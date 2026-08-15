@@ -56,13 +56,13 @@ const db = getFirestore(app);
   ];
 
   const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  const hasCloud = typeof window.storage !== 'undefined';
 
   const listEl = document.getElementById('calendar-list');
   const sentinel = document.getElementById('sentinel');
   const loadingRow = document.querySelector('.loading-row');
-  const cache = {};
-  const cellRefs = {};
+  
+  let cache = {};
+  let cellRefs = {};
   let cursor = new Date();
   cursor.setDate(1);
   let selectedColor = 'violet';
@@ -77,14 +77,13 @@ const db = getFirestore(app);
     try { return JSON.parse(localStorage.getItem('nocturna:session') || 'null'); } catch (e) { return null; }
   }
 
-  // FIX: Valid RFC domain format (.com instead of .local)
   function deriveNocturnaEmail(username) {
     return `${(username || '').trim().toLowerCase().replace(/\s+/g, '')}@nocturna.com`;
   }
 
   function currentUserKey() {
-    const session = getSession();
     if (auth.currentUser && auth.currentUser.uid) return auth.currentUser.uid;
+    const session = getSession();
     return session && session.username ? session.username.toLowerCase() : 'guest';
   }
 
@@ -99,20 +98,24 @@ const db = getFirestore(app);
       const snap = await getDoc(ref);
       return snap.exists() ? (snap.data().calendar || {}) : {};
     } catch (e) {
-      console.warn('Firestore load failed', e);
+      console.warn('Firestore load error:', e);
       return {};
     }
   }
 
-  async function saveUserCalendarToFirestore(calendar) {
+  async function saveMonthToFirestore(key, data) {
     if (!auth.currentUser) return;
     try {
       const ref = doc(db, 'users', auth.currentUser.uid);
       const username = getSession()?.username || auth.currentUser.email?.split('@')[0] || 'Nocturna user';
+      
+      // Save directly using a nested field update for fast performance
       await setDoc(ref, {
         username,
         email: auth.currentUser.email || deriveNocturnaEmail(username),
-        calendar
+        calendar: {
+          [key]: data
+        }
       }, { merge: true });
     } catch (e) {
       console.warn('Firestore sync failed', e);
@@ -130,29 +133,19 @@ const db = getFirestore(app);
     try { localStorage.setItem(monthStorageKey(key), JSON.stringify(data)); } catch (e) {}
   }
 
-  function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
-
   async function loadMonth(key) {
     if (cache[key]) return cache[key];
     let data = readLocal(key);
 
     if (auth.currentUser) {
       try {
-        const calendar = await loadUserCalendarFromFirestore();
-        data = calendar[key] || data;
+        const cloudCalendar = await loadUserCalendarFromFirestore();
+        if (cloudCalendar[key]) {
+          data = cloudCalendar[key];
+          writeLocal(key, data);
+        }
       } catch (e) {
         data = readLocal(key);
-      }
-    } else if (hasCloud) {
-      let loaded = false;
-      for (let attempt = 0; attempt < 2 && !loaded; attempt++) {
-        try {
-          const res = await window.storage.get('month:' + key + ':' + currentUserKey(), false);
-          data = res && res.value ? JSON.parse(res.value) : data;
-          loaded = true;
-        } catch (e) {
-          if (attempt === 0) await wait(350);
-        }
       }
     }
 
@@ -160,29 +153,11 @@ const db = getFirestore(app);
     return cache[key];
   }
 
-  async function saveMonth(key) {
+  function saveMonth(key) {
     const data = cache[key] || {};
     writeLocal(key, data);
-
     if (auth.currentUser) {
-      try {
-        const calendar = await loadUserCalendarFromFirestore();
-        const nextCalendar = { ...calendar, [key]: data };
-        await saveUserCalendarToFirestore(nextCalendar);
-        return;
-      } catch (e) {
-        console.warn('Firebase save failed, keeping local copy', e);
-      }
-    }
-
-    if (!hasCloud) return;
-    for (let attempt = 0; attempt < 2; attempt++) {
-      try {
-        await window.storage.set('month:' + key + ':' + currentUserKey(), JSON.stringify(data), false);
-        return;
-      } catch (e) {
-        if (attempt === 0) await wait(350);
-      }
+      saveMonthToFirestore(key, data); // Async background save
     }
   }
 
@@ -303,10 +278,21 @@ const db = getFirestore(app);
   }
 
   async function appendNextMonth() {
-    loadingRow.style.display = 'block';
+    if (loadingRow) loadingRow.style.display = 'block';
     try { await renderMonth(new Date(cursor)); } catch (e) { }
     cursor.setMonth(cursor.getMonth() + 1);
-    loadingRow.style.display = 'none';
+    if (loadingRow) loadingRow.style.display = 'none';
+  }
+
+  async function reloadEntireCalendar() {
+    listEl.innerHTML = '';
+    cache = {};
+    cellRefs = {};
+    cursor = new Date();
+    cursor.setDate(1);
+    for (let i = 0; i < 6; i++) {
+      await appendNextMonth();
+    }
   }
 
   if (typeof IntersectionObserver !== 'undefined') {
@@ -486,11 +472,12 @@ const db = getFirestore(app);
     if (!data || !data[dayNumber]) return;
 
     data[dayNumber].events = (data[dayNumber].events || []).filter(e => e.id !== id);
-    await saveMonth(monthKey);
+    saveMonth(monthKey);
     paintCell(activeDateKey, data[dayNumber]);
     await renderSheetContents();
   }
 
+  // Instant local update + background cloud sync
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const title = titleInput.value.trim();
@@ -521,7 +508,7 @@ const db = getFirestore(app);
       });
     }
 
-    await saveMonth(monthKey);
+    saveMonth(monthKey);
     paintCell(activeDateKey, entry);
     resetForm();
     await renderSheetContents();
@@ -535,7 +522,7 @@ const db = getFirestore(app);
 
     const entry = cache[monthKey][dayNumber];
     entry.complete = !entry.complete;
-    await saveMonth(monthKey);
+    saveMonth(monthKey);
     paintCell(activeDateKey, entry);
     doneSwitch.classList.toggle('on', entry.complete);
     doneLabel.textContent = entry.complete ? 'Day complete' : 'Mark day complete';
@@ -609,6 +596,9 @@ const db = getFirestore(app);
     const normalizedUsername = username.toLowerCase().replace(/\s+/g, '');
     const email = deriveNocturnaEmail(normalizedUsername);
 
+    authSubmit.disabled = true;
+    authSubmit.textContent = mode === 'register' ? 'Creating...' : 'Logging in...';
+
     try {
       if (mode === 'register') {
         const credential = await createUserWithEmailAndPassword(auth, email, password);
@@ -617,19 +607,18 @@ const db = getFirestore(app);
           email,
           calendar: {}
         }, { merge: true });
+        setSession(username);
       } else {
-        const credential = await signInWithEmailAndPassword(auth, email, password);
-        const ref = doc(db, 'users', credential.user.uid);
-        const snap = await getDoc(ref);
-        const storedUsername = snap.exists() ? (snap.data().username || username) : username;
-        setSession(storedUsername);
+        await signInWithEmailAndPassword(auth, email, password);
+        setSession(username);
       }
 
       hideAuth();
       authForm.reset();
       updateAuthState();
+      await reloadEntireCalendar(); // Reloads calendar from user's cloud account!
     } catch (error) {
-      console.error("Firebase Auth/Firestore Error:", error.code, error.message);
+      console.error("Firebase Auth Error:", error.code, error.message);
       let message = 'Something went wrong. Please try again.';
 
       if (error.code === 'auth/email-already-in-use') {
@@ -645,13 +634,16 @@ const db = getFirestore(app);
       ) {
         message = 'Incorrect username or password.';
       } else if (error.code === 'auth/operation-not-allowed') {
-        message = 'Email/Password authentication is disabled in Firebase Console.';
+        message = 'Email/Password sign-in is disabled in Firebase Console.';
       } else if (error.code === 'permission-denied') {
         message = 'Database permission denied. Check your Firestore security rules.';
       }
 
       authError.textContent = message;
       authError.style.display = 'block';
+    } finally {
+      authSubmit.disabled = false;
+      authSubmit.textContent = mode === 'register' ? 'Create account' : 'Log in';
     }
   }
 
@@ -680,18 +672,21 @@ const db = getFirestore(app);
     updateAuthState();
     authForm.reset();
     setAuthMode('login');
+    await reloadEntireCalendar();
   });
 
   onAuthStateChanged(auth, async (user) => {
     if (user) {
-      const ref = doc(db, 'users', user.uid);
-      const snap = await getDoc(ref);
-      const storedUsername = snap.exists() ? (snap.data().username || user.email?.split('@')[0] || 'Nocturna user') : (user.email?.split('@')[0] || 'Nocturna user');
-      setSession(storedUsername);
+      const session = getSession();
+      if (!session) {
+        const username = user.email ? user.email.split('@')[0] : 'User';
+        setSession(username);
+      }
     } else {
       clearSession();
     }
     updateAuthState();
+    await reloadEntireCalendar();
   });
 
   authForm.addEventListener('submit', handleAuthSubmit);
@@ -699,11 +694,6 @@ const db = getFirestore(app);
     if (event.target === authOverlay && getSession()) hideAuth();
   });
 
-  (async function init() {
-    setAuthMode('login');
-    updateAuthState();
-    for (let i = 0; i < 6; i++) {
-      await appendNextMonth();
-    }
-  })();
+  setAuthMode('login');
+  updateAuthState();
 })();
