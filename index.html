@@ -3,7 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c0b15">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Nocturna</title>
+  <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -80,6 +84,10 @@
     </div>
   </div>
 
+  <div class="top-search-wrap">
+    <input id="search-input" class="top-search" type="search" placeholder="Search events…" aria-label="Search calendar events">
+  </div>
+
   <div class="top-actions">
     <button id="auth-button" class="primary-button">Log in</button>
     <button id="logout-button" class="ghost-button">Log out</button>
@@ -89,6 +97,7 @@
 <div id="calendar-list"></div>
 <div id="sentinel"></div>
 <div class="loading-row">Loading…</div>
+<button id="today-button" class="today-button" aria-label="Jump to today">Today</button>
 
 <div class="backdrop" id="backdrop"></div>
 <div class="sheet" id="sheet">
@@ -120,6 +129,21 @@
         <label for="f-location">Location</label>
         <input type="text" id="f-location" placeholder="Optional" maxlength="60">
       </div>
+    </div>
+    <div class="field toggle-row">
+      <label for="f-all-day">All day</label>
+      <div class="toggle-wrap">
+        <input type="checkbox" id="f-all-day">
+      </div>
+    </div>
+    <div class="field">
+      <label for="f-repeat">Repeat</label>
+      <select id="f-repeat">
+        <option value="none">Does not repeat</option>
+        <option value="daily">Daily</option>
+        <option value="weekly">Weekly</option>
+        <option value="monthly">Monthly</option>
+      </select>
     </div>
     <div class="field">
       <label>Event color</label>

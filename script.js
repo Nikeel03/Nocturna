@@ -60,6 +60,8 @@ const db = getFirestore(app);
   const listEl = document.getElementById('calendar-list');
   const sentinel = document.getElementById('sentinel');
   const loadingRow = document.querySelector('.loading-row');
+  const searchInput = document.getElementById('search-input');
+  const todayButton = document.getElementById('today-button');
   
   let cache = {};
   let cellRefs = {};
@@ -183,6 +185,32 @@ const db = getFirestore(app);
     return `rgba(${r}, ${g}, ${b}, ${alpha})`;
   }
 
+  function getEventMatchText(event = {}) {
+    return `${event.title || ''} ${event.location || ''} ${(event.color || '')}`.toLowerCase();
+  }
+
+  function getSearchQuery() {
+    return (searchInput?.value || '').trim().toLowerCase();
+  }
+
+  function dayMatchesSearch(entry = {}) {
+    const query = getSearchQuery();
+    if (!query) return true;
+    const events = Array.isArray(entry.events) ? entry.events : [];
+    return events.some(ev => getEventMatchText(ev).includes(query));
+  }
+
+  function monthlyCompletionTotal(monthKeyValue) {
+    const monthData = cache[monthKeyValue] || {};
+    const days = Object.keys(monthData).filter(key => key !== 'meta');
+    let doneCount = 0;
+    days.forEach(dayKey => {
+      const entry = monthData[dayKey] || {};
+      if (entry.complete) doneCount += 1;
+    });
+    return doneCount;
+  }
+
   async function renderMonth(baseDate) {
     const y = baseDate.getFullYear();
     const m = baseDate.getMonth();
@@ -194,9 +222,19 @@ const db = getFirestore(app);
 
     const sticky = document.createElement('div');
     sticky.className = 'month-sticky';
+    const headerRow = document.createElement('div');
+    headerRow.className = 'month-header-row';
     const h2 = document.createElement('h2');
     h2.textContent = baseDate.toLocaleString('en-US', { month: 'long', year: 'numeric' });
-    sticky.appendChild(h2);
+    headerRow.appendChild(h2);
+
+    const streak = document.createElement('span');
+    streak.className = 'month-streak';
+    const completion = monthlyCompletionTotal(key);
+    streak.textContent = `${completion} done`;
+    headerRow.appendChild(streak);
+
+    sticky.appendChild(headerRow);
     section.appendChild(sticky);
 
     const weekdays = document.createElement('div');
@@ -245,6 +283,12 @@ const db = getFirestore(app);
     cell.classList.toggle('done', over);
     cell.innerHTML = '';
 
+    const query = getSearchQuery();
+    const events = (entry && entry.events) || [];
+    const visibleEvents = query ? events.filter(ev => getEventMatchText(ev).includes(query)) : events;
+    const shouldHide = !!query && visibleEvents.length === 0;
+    cell.style.display = shouldHide ? 'none' : '';
+
     const dayColor = entry && entry.dayColor ? entry.dayColor : null;
     cell.style.background = dayColor ? withAlpha(dayColor, 0.22) : 'var(--surface)';
     cell.style.borderColor = dayColor || 'var(--border)';
@@ -257,20 +301,21 @@ const db = getFirestore(app);
 
     const chips = document.createElement('div');
     chips.className = 'chips';
-    const events = (entry && entry.events) || [];
-    events.slice(0, 3).forEach(ev => {
+    visibleEvents.slice(0, 3).forEach(ev => {
       const chip = document.createElement('div');
       chip.className = 'chip';
       const colorObj = COLORS.find(c => c.id === ev.color) || COLORS[0];
       chip.style.background = colorObj.hex;
-      chip.textContent = (ev.time ? ev.time + ' ' : '') + ev.title;
+      const meta = ev.allDay ? 'All day' : (ev.time ? ev.time : '');
+      const repeatLabel = ev.repeat && ev.repeat !== 'none' ? ` · ${ev.repeat}` : '';
+      chip.textContent = `${meta ? meta + ' ' : ''}${ev.title}${repeatLabel}`;
       chips.appendChild(chip);
     });
 
-    if (events.length > 3) {
+    if (visibleEvents.length > 3) {
       const more = document.createElement('div');
       more.className = 'chip-more';
-      more.textContent = '+' + (events.length - 3) + ' more';
+      more.textContent = '+' + (visibleEvents.length - 3) + ' more';
       chips.appendChild(more);
     }
 
@@ -328,6 +373,8 @@ const db = getFirestore(app);
   const titleInput = document.getElementById('f-title');
   const timeInput = document.getElementById('f-time');
   const locInput = document.getElementById('f-location');
+  const allDayInput = document.getElementById('f-all-day');
+  const repeatInput = document.getElementById('f-repeat');
   const colorRow = document.getElementById('color-row');
   const dayColorPicker = document.getElementById('f-day-color');
   const saveBtn = document.getElementById('save-btn');
@@ -369,7 +416,55 @@ const db = getFirestore(app);
   function closeSheet() {
     backdrop.classList.remove('open');
     sheet.classList.remove('open');
+    sheet.style.transform = '';
+    sheet.style.transition = '';
     resetForm();
+  }
+
+  let dragStartY = null;
+  let dragDeltaY = 0;
+
+  function handleSheetPointerDown(event) {
+    if (!sheet.classList.contains('open')) return;
+    if (event.target.closest('button, input, textarea, select')) return;
+
+    dragStartY = event.clientY;
+    dragDeltaY = 0;
+    sheet.style.transition = 'none';
+    sheet.setPointerCapture?.(event.pointerId);
+  }
+
+  function handleSheetPointerMove(event) {
+    if (dragStartY === null) return;
+
+    const delta = event.clientY - dragStartY;
+    if (delta <= 0) {
+      sheet.style.transform = 'translateY(0px)';
+      return;
+    }
+
+    dragDeltaY = Math.min(delta, 220);
+    sheet.style.transform = `translateY(${dragDeltaY}px)`;
+  }
+
+  function handleSheetPointerUp(event) {
+    if (dragStartY === null) return;
+
+    const shouldClose = dragDeltaY > 120;
+    sheet.style.transition = '';
+    sheet.style.transform = '';
+    dragStartY = null;
+    dragDeltaY = 0;
+
+    if (event.pointerId !== undefined) {
+      try {
+        sheet.releasePointerCapture?.(event.pointerId);
+      } catch (e) {}
+    }
+
+    if (shouldClose) {
+      closeSheet();
+    }
   }
 
   backdrop.addEventListener('click', closeSheet);
@@ -377,6 +472,10 @@ const db = getFirestore(app);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && sheet.classList.contains('open')) closeSheet();
   });
+  sheet.addEventListener('pointerdown', handleSheetPointerDown);
+  sheet.addEventListener('pointermove', handleSheetPointerMove);
+  sheet.addEventListener('pointerup', handleSheetPointerUp);
+  sheet.addEventListener('pointercancel', handleSheetPointerUp);
 
   function currentMonthKeyFromActive() {
     return activeDateKey.slice(0, 7);
@@ -422,10 +521,13 @@ const db = getFirestore(app);
       const metaParts = [];
       if (ev.time) metaParts.push(formatTime(ev.time));
       if (ev.location) metaParts.push(ev.location);
-      if (metaParts.length) {
+      if (metaParts.length || ev.allDay || ev.repeat) {
         const meta = document.createElement('div');
         meta.className = 'event-meta';
-        meta.textContent = metaParts.join(' · ');
+        const detailParts = [...metaParts];
+        if (ev.allDay) detailParts.unshift('All day');
+        if (ev.repeat && ev.repeat !== 'none') detailParts.push(`Repeats ${ev.repeat}`);
+        meta.textContent = detailParts.join(' · ');
         info.appendChild(meta);
       }
 
@@ -463,6 +565,8 @@ const db = getFirestore(app);
     titleInput.value = '';
     timeInput.value = '';
     locInput.value = '';
+    allDayInput.checked = false;
+    repeatInput.value = 'none';
     formErr.style.display = 'none';
     setSelectedColor('violet');
     dayColorPicker.value = '#8b5cf6';
@@ -475,6 +579,8 @@ const db = getFirestore(app);
     titleInput.value = ev.title;
     timeInput.value = ev.time || '';
     locInput.value = ev.location || '';
+    allDayInput.checked = !!ev.allDay;
+    repeatInput.value = ev.repeat || 'none';
     setSelectedColor(ev.color || 'violet');
     saveBtn.textContent = 'Update event';
     cancelEditBtn.style.display = 'block';
@@ -513,16 +619,18 @@ const db = getFirestore(app);
 
     const entry = cache[monthKey][dayNumber];
     if (dayColorPicker.value) entry.dayColor = dayColorPicker.value;
+    const normalizedRepeat = repeatInput.value || 'none';
+    const allDay = !!allDayInput.checked;
 
     if (editingId) {
       const idx = entry.events.findIndex(ev => ev.id === editingId);
       if (idx > -1) {
-        entry.events[idx] = { ...entry.events[idx], title, time: timeInput.value, location: locInput.value.trim(), color: selectedColor };
+        entry.events[idx] = { ...entry.events[idx], title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, location: locInput.value.trim(), color: selectedColor };
       }
     } else {
       entry.events.push({
         id: 'e' + Date.now() + Math.random().toString(36).slice(2, 7),
-        title, time: timeInput.value, location: locInput.value.trim(), color: selectedColor
+        title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, location: locInput.value.trim(), color: selectedColor
       });
     }
 
@@ -722,6 +830,36 @@ const db = getFirestore(app);
   authOverlay.addEventListener('click', event => {
     if (event.target === authOverlay && getSession()) hideAuth();
   });
+
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      Object.keys(cellRefs).forEach(dKey => {
+        const monthKeyValue = dKey.slice(0, 7);
+        const dayNumber = dKey.slice(-2);
+        const entry = (cache[monthKeyValue] && cache[monthKeyValue][dayNumber]) || { events: [] };
+        paintCell(dKey, entry);
+      });
+    });
+  }
+
+  if (todayButton) {
+    todayButton.addEventListener('click', () => {
+      const today = new Date();
+      const section = [...document.querySelectorAll('.month-section')].find((monthSection) => {
+        const heading = monthSection.querySelector('h2');
+        return heading && heading.textContent.includes(today.toLocaleString('en-US', { month: 'long' })) && heading.textContent.includes(String(today.getFullYear()));
+      });
+      if (section) {
+        section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  }
+
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    });
+  }
 
   async function initCalendar() {
     setAuthMode('login');

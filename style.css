@@ -56,6 +56,27 @@ header.top {
   border-bottom: 1px solid var(--border);
 }
 
+.top-search-wrap {
+  flex: 1;
+  min-width: 140px;
+  max-width: 420px;
+}
+
+.top-search {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+  border-radius: 12px;
+  color: var(--text-primary);
+  padding: 9px 12px;
+  font-size: 14px;
+}
+
+.top-search:focus {
+  outline: none;
+  border-color: var(--accent-purple);
+}
+
 .brand-block {
   display: flex;
   align-items: center;
@@ -175,11 +196,32 @@ header.top {
   padding: 14px 6px 8px;
 }
 
+.month-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .month-sticky h2 {
   margin: 0;
   font-size: 17px;
   font-weight: 600;
   color: var(--text-primary);
+}
+
+.month-streak {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 68px;
+  background: rgba(139, 92, 246, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-secondary);
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 4px 8px;
 }
 
 .weekdays {
@@ -335,6 +377,8 @@ header.top {
   max-height: 86vh;
   overflow-y: auto;
   box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.24);
+  touch-action: pan-y;
+  user-select: none;
 }
 
 .sheet.open {
@@ -507,7 +551,8 @@ form.event-form {
   font-weight: 700;
 }
 
-.field input {
+.field input,
+.field select {
   width: 100%;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -515,6 +560,25 @@ form.event-form {
   padding: 10px 12px;
   color: var(--text-primary);
   font-size: 15px;
+}
+
+.toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.toggle-wrap {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.toggle-wrap input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent-purple);
 }
 
 .password-wrap {
@@ -744,6 +808,21 @@ form.event-form {
   border: 1px solid rgba(248, 113, 113, 0.2);
   border-radius: 10px;
   padding: 8px 10px;
+}
+
+.today-button {
+  position: fixed;
+  right: 18px;
+  bottom: 24px;
+  z-index: 40;
+  border: none;
+  border-radius: 999px;
+  padding: 10px 16px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(90deg, var(--accent-black), var(--accent-blue));
+  box-shadow: 0 16px 30px rgba(139, 92, 246, 0.35);
+  cursor: pointer;
 }
 
 @media (max-width: 480px) {
