@@ -277,19 +277,35 @@ const db = getFirestore(app);
     cell.appendChild(chips);
   }
 
+  let monthOffset = 0;
+  let isLoading = false;
+
   async function appendNextMonth() {
+    if (isLoading) return;
+    isLoading = true;
+
     if (loadingRow) loadingRow.style.display = 'block';
-    try { await renderMonth(new Date(cursor)); } catch (e) { }
-    cursor.setMonth(cursor.getMonth() + 1);
-    if (loadingRow) loadingRow.style.display = 'none';
+
+    try {
+      const now = new Date();
+      const targetDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+
+      await renderMonth(targetDate);
+      monthOffset++;
+    } catch (e) {
+      console.error('Error rendering month:', e);
+    } finally {
+      if (loadingRow) loadingRow.style.display = 'none';
+      isLoading = false;
+    }
   }
 
   async function reloadEntireCalendar() {
     listEl.innerHTML = '';
     cache = {};
     cellRefs = {};
-    cursor = new Date();
-    cursor.setDate(1);
+    monthOffset = 0;
+
     for (let i = 0; i < 6; i++) {
       await appendNextMonth();
     }

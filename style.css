@@ -121,6 +121,23 @@ header.top {
   background: linear-gradient(90deg, var(--accent-purple), var(--accent-blue));
   color: #fff;
   box-shadow: 0 10px 20px rgba(139, 92, 246, 0.24);
+  transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+}
+
+.primary-button:hover,
+.ghost-button:hover,
+.tab-button:hover,
+.auth-submit:hover,
+.btn:hover,
+.icon-btn:hover,
+.swatch:hover,
+.sheet-close:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+.primary-button:hover {
+  box-shadow: 0 14px 28px rgba(139, 92, 246, 0.3);
 }
 
 .primary-button.is-user {
@@ -138,6 +155,12 @@ header.top {
   background: rgba(255, 255, 255, 0.03);
   color: var(--text-secondary);
   border: 1px solid var(--border);
+  transition: transform .18s ease, border-color .18s ease, background .18s ease;
+}
+
+.ghost-button:hover {
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .month-section {
@@ -194,6 +217,13 @@ header.top {
   flex-direction: column;
   gap: 4px;
   overflow: hidden;
+  transition: transform .18s ease, border-color .18s ease, box-shadow .18s ease, background .18s ease;
+}
+
+.cell:hover {
+  transform: translateY(-1px);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.12);
 }
 
 .cell.empty {
@@ -301,9 +331,10 @@ header.top {
   border-radius: 20px 20px 0 0;
   padding: 14px 18px calc(env(safe-area-inset-bottom, 0px) + 22px);
   transform: translateY(100%);
-  transition: transform .28s cubic-bezier(.32, .72, 0, 1);
+  transition: transform .3s cubic-bezier(.22, 1, .36, 1), opacity .2s ease;
   max-height: 86vh;
   overflow-y: auto;
+  box-shadow: 0 -18px 40px rgba(0, 0, 0, 0.24);
 }
 
 .sheet.open {
@@ -566,12 +597,23 @@ form.event-form {
   background: rgba(8, 5, 15, 0.74);
   opacity: 0;
   pointer-events: none;
-  transition: opacity .2s ease;
+  transition: opacity .22s ease;
 }
 
 .auth-overlay.visible {
   opacity: 1;
   pointer-events: auto;
+}
+
+.auth-card {
+  transform: translateY(8px) scale(0.98);
+  opacity: 0;
+  transition: transform .24s cubic-bezier(.2, .8, .2, 1), opacity .2s ease;
+}
+
+.auth-overlay.visible .auth-card {
+  transform: translateY(0) scale(1);
+  opacity: 1;
 }
 
 .auth-card {
@@ -619,6 +661,7 @@ form.event-form {
   background: transparent;
   color: var(--text-secondary);
   font-weight: 700;
+  transition: transform .18s ease, background .18s ease, color .18s ease;
 }
 
 .tab-button.active {
