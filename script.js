@@ -375,6 +375,7 @@ const db = getFirestore(app);
   const locInput = document.getElementById('f-location');
   const allDayInput = document.getElementById('f-all-day');
   const repeatInput = document.getElementById('f-repeat');
+  const reminderInput = document.getElementById('f-reminder');
   const colorRow = document.getElementById('color-row');
   const dayColorPicker = document.getElementById('f-day-color');
   const saveBtn = document.getElementById('save-btn');
@@ -521,13 +522,12 @@ const db = getFirestore(app);
       const metaParts = [];
       if (ev.time) metaParts.push(formatTime(ev.time));
       if (ev.location) metaParts.push(ev.location);
-      if (metaParts.length || ev.allDay || ev.repeat) {
+      if (metaParts.length || ev.allDay || ev.repeat || ev.reminder) {
         const meta = document.createElement('div');
         meta.className = 'event-meta';
         const detailParts = [...metaParts];
         if (ev.allDay) detailParts.unshift('All day');
-        if (ev.repeat && ev.repeat !== 'none') detailParts.push(`Repeats ${ev.repeat}`);
-        meta.textContent = detailParts.join(' · ');
+        if (ev.repeat && ev.repeat !== 'none') detailParts.push(`Repeats ${ev.repeat}`);      if (ev.reminder && ev.reminder !== 'none') detailParts.push(`Alert ${ev.reminder}`);        meta.textContent = detailParts.join(' · ');
         info.appendChild(meta);
       }
 
@@ -567,6 +567,7 @@ const db = getFirestore(app);
     locInput.value = '';
     allDayInput.checked = false;
     repeatInput.value = 'none';
+    reminderInput.value = 'none';
     formErr.style.display = 'none';
     setSelectedColor('violet');
     dayColorPicker.value = '#8b5cf6';
@@ -581,6 +582,7 @@ const db = getFirestore(app);
     locInput.value = ev.location || '';
     allDayInput.checked = !!ev.allDay;
     repeatInput.value = ev.repeat || 'none';
+    reminderInput.value = ev.reminder || 'none';
     setSelectedColor(ev.color || 'violet');
     saveBtn.textContent = 'Update event';
     cancelEditBtn.style.display = 'block';
@@ -621,16 +623,17 @@ const db = getFirestore(app);
     if (dayColorPicker.value) entry.dayColor = dayColorPicker.value;
     const normalizedRepeat = repeatInput.value || 'none';
     const allDay = !!allDayInput.checked;
+    const reminder = reminderInput.value || 'none';
 
     if (editingId) {
       const idx = entry.events.findIndex(ev => ev.id === editingId);
       if (idx > -1) {
-        entry.events[idx] = { ...entry.events[idx], title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, location: locInput.value.trim(), color: selectedColor };
+        entry.events[idx] = { ...entry.events[idx], title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, reminder, location: locInput.value.trim(), color: selectedColor };
       }
     } else {
       entry.events.push({
         id: 'e' + Date.now() + Math.random().toString(36).slice(2, 7),
-        title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, location: locInput.value.trim(), color: selectedColor
+        title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, reminder, location: locInput.value.trim(), color: selectedColor
       });
     }
 
@@ -855,6 +858,60 @@ const db = getFirestore(app);
     });
   }
 
+  function getReminderMilliseconds(reminderStr) {    const match = reminderStr.match(/(\d+)([mhd\w])/);
+    if (!match) return 0;
+    const [, num, unit] = match;
+    const n = parseInt(num);
+    if (unit === 'm') return n * 60 * 1000;
+    if (unit === 'h') return n * 60 * 60 * 1000;
+    if (unit === 'd') return n * 24 * 60 * 60 * 1000;
+    if (unit === 'w') return n * 7 * 24 * 60 * 60 * 1000;
+    return 0;
+  }
+
+  function showReminder(event, eventDate) {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(`Reminder: ${event.title}`, {
+        body: event.location ? `📍 ${event.location}` : 'Your event is coming up!',
+        icon: 'data:image/svg+xml,<svg viewBox=\"0 0 64 64\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"32\" cy=\"32\" r=\"30\" fill=\"%238b5cf6\"/><path d=\"M32 16v20m10-10H22\" stroke=\"white\" stroke-width=\"3\" stroke-linecap=\"round\"/></svg>',
+        tag: `nocturna-${event.id}`,
+        requireInteraction: false
+      });
+    }
+  }
+
+  function checkReminders() {
+    const now = new Date();
+    Object.entries(cache).forEach(([monthKey, monthData]) => {
+      Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
+        if (!dayEntry.events) return;
+        dayEntry.events.forEach(event => {
+          if (!event.reminder || event.reminder === 'none') return;
+          const reminderMs = getReminderMilliseconds(event.reminder);
+          const [y, m, d] = monthKey.split('-').map(Number);
+          const eventDate = new Date(y, m - 1, d);
+          if (event.time) {
+            const [h, mm] = event.time.split(':').map(Number);
+            eventDate.setHours(h, mm, 0, 0);
+          } else {
+            eventDate.setHours(9, 0, 0, 0);
+          }
+          const reminderTime = new Date(eventDate.getTime() - reminderMs);
+          const timeDiff = Math.abs(now.getTime() - reminderTime.getTime());
+          if (timeDiff < 60000 && reminderTime <= now && now < eventDate) {
+            showReminder(event, eventDate);
+          }
+        });
+      });
+    });
+  }
+
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+
+  setInterval(checkReminders, 60000);
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
       navigator.serviceWorker.register('./sw.js').catch(() => {});
@@ -863,8 +920,8 @@ const db = getFirestore(app);
 
   async function initCalendar() {
     setAuthMode('login');
-    updateAuthState();
-    await reloadEntireCalendar();
+    // Don't call updateAuthState() here - let onAuthStateChanged handle it
+    // This prevents the auth overlay from showing before Firebase restores the session
   }
 
   initCalendar();
