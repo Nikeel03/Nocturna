@@ -63,11 +63,11 @@ const db = getFirestore(app);
   
   let cache = {};
   let cellRefs = {};
-  let cursor = new Date();
-  cursor.setDate(1);
   let selectedColor = 'violet';
   let editingId = null;
   let activeDateKey = null;
+  let monthOffset = 0;
+  let isLoading = false;
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function monthKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
@@ -277,9 +277,6 @@ const db = getFirestore(app);
     cell.appendChild(chips);
   }
 
-  let monthOffset = 0;
-  let isLoading = false;
-
   async function appendNextMonth() {
     if (isLoading) return;
     isLoading = true;
@@ -287,8 +284,10 @@ const db = getFirestore(app);
     if (loadingRow) loadingRow.style.display = 'block';
 
     try {
-      const now = new Date();
-      const targetDate = new Date(now.getFullYear(), now.getMonth() + monthOffset, 1);
+      const targetDate = new Date();
+      targetDate.setHours(0, 0, 0, 0);
+      targetDate.setDate(1);
+      targetDate.setMonth(targetDate.getMonth() + monthOffset);
 
       await renderMonth(targetDate);
       monthOffset++;
@@ -311,10 +310,10 @@ const db = getFirestore(app);
     }
   }
 
-  if (typeof IntersectionObserver !== 'undefined') {
+  if (typeof IntersectionObserver !== 'undefined' && sentinel) {
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
-        if (entry.isIntersecting) appendNextMonth();
+        if (entry.isIntersecting && !isLoading) appendNextMonth();
       });
     }, { rootMargin: '400px' });
     observer.observe(sentinel);
@@ -710,6 +709,11 @@ const db = getFirestore(app);
     if (event.target === authOverlay && getSession()) hideAuth();
   });
 
-  setAuthMode('login');
-  updateAuthState();
+  async function initCalendar() {
+    setAuthMode('login');
+    updateAuthState();
+    await reloadEntireCalendar();
+  }
+
+  initCalendar();
 })();
