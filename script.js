@@ -63,6 +63,7 @@ const db = getFirestore(app);
   const searchInput = document.getElementById('search-input');
   const todayButton = document.getElementById('today-button');
   
+  let fullCalendar = {};
   let cache = {};
   let cellRefs = {};
   let selectedColor = 'violet';
@@ -89,10 +90,6 @@ const db = getFirestore(app);
     return session && session.username ? session.username.toLowerCase() : 'guest';
   }
 
-  function monthStorageKey(key) {
-    return currentUserKey() + ':month:' + key;
-  }
-
   async function loadUserCalendarFromFirestore() {
     if (!auth.currentUser) return {};
     try {
@@ -110,14 +107,10 @@ const db = getFirestore(app);
     try {
       const ref = doc(db, 'users', auth.currentUser.uid);
       const username = getSession()?.username || auth.currentUser.email?.split('@')[0] || 'Nocturna user';
-      
-      // Save directly using a nested field update for fast performance
       await setDoc(ref, {
         username,
         email: auth.currentUser.email || deriveNocturnaEmail(username),
-        calendar: {
-          [key]: data
-        }
+        calendar: { [key]: data }
       }, { merge: true });
     } catch (e) {
       console.warn('Firestore sync failed', e);
@@ -126,41 +119,94 @@ const db = getFirestore(app);
 
   function readLocal(key) {
     try {
-      const raw = localStorage.getItem(monthStorageKey(key));
+      const raw = localStorage.getItem(currentUserKey() + ':month:' + key);
       return raw ? JSON.parse(raw) : {};
     } catch (e) { return {}; }
   }
 
   function writeLocal(key, data) {
-    try { localStorage.setItem(monthStorageKey(key), JSON.stringify(data)); } catch (e) {}
+    try { localStorage.setItem(currentUserKey() + ':month:' + key, JSON.stringify(data)); } catch (e) {}
+  }
+
+  // Merges direct month events with recurring/yearly birthday events from other months
+  function expandRecurringEvents(targetKey, baseData) {
+    const [targetYear, targetMonth] = targetKey.split('-').map(Number);
+    const expanded = JSON.parse(JSON.stringify(baseData || {}));
+
+    Object.entries(fullCalendar).forEach(([srcMonthKey, srcMonthData]) => {
+      const [srcYear, srcMonth] = srcMonthKey.split('-').map(Number);
+      
+      Object.entries(srcMonthData).forEach(([dayNum, dayEntry]) => {
+        if (!dayEntry.events) return;
+
+        dayEntry.events.forEach(ev => {
+          if (!ev.repeat || ev.repeat === 'none') return;
+
+          let shouldInclude = false;
+
+          if (ev.repeat === 'yearly') {
+            // Same month, same day, any subsequent or previous year
+            if (srcMonth === targetMonth && srcYear <= targetYear) {
+              shouldInclude = true;
+            }
+          } else if (ev.repeat === 'monthly') {
+            // Same day, every month
+            const srcDate = new Date(srcYear, srcMonth - 1, Number(dayNum));
+            const curDate = new Date(targetYear, targetMonth - 1, Number(dayNum));
+            if (curDate >= srcDate) shouldInclude = true;
+          }
+
+          if (shouldInclude) {
+            if (!expanded[dayNum]) expanded[dayNum] = { events: [], complete: false };
+            const exists = expanded[dayNum].events.some(existing => existing.id === ev.id);
+            if (!exists) {
+              expanded[dayNum].events.push({ ...ev, isRecurringInstance: true });
+            }
+          }
+        });
+      });
+    });
+
+    return expanded;
   }
 
   async function loadMonth(key) {
-    if (cache[key]) return cache[key];
-    let data = readLocal(key);
+    let rawData = readLocal(key);
 
-    if (auth.currentUser) {
+    if (auth.currentUser && Object.keys(fullCalendar).length === 0) {
       try {
-        const cloudCalendar = await loadUserCalendarFromFirestore();
-        if (cloudCalendar[key]) {
-          data = cloudCalendar[key];
-          writeLocal(key, data);
-        }
-      } catch (e) {
-        data = readLocal(key);
-      }
+        fullCalendar = await loadUserCalendarFromFirestore();
+      } catch (e) {}
     }
 
-    cache[key] = data || {};
+    if (fullCalendar[key]) {
+      rawData = fullCalendar[key];
+      writeLocal(key, rawData);
+    }
+
+    cache[key] = expandRecurringEvents(key, rawData);
     return cache[key];
   }
 
   function saveMonth(key) {
-    const data = cache[key] || {};
-    writeLocal(key, data);
+    const dataToSave = {};
+    const currentCached = cache[key] || {};
+
+    // Do not save auto-generated recurring copies back into the persistent document
+    Object.keys(currentCached).forEach(dayKey => {
+      const dayData = currentCached[dayKey];
+      const directEvents = (dayData.events || []).filter(ev => !ev.isRecurringInstance);
+      dataToSave[dayKey] = { ...dayData, events: directEvents };
+    });
+
+    fullCalendar[key] = dataToSave;
+    writeLocal(key, dataToSave);
+
     if (auth.currentUser) {
-      saveMonthToFirestore(key, data); // Async background save
+      saveMonthToFirestore(key, dataToSave);
     }
+
+    cache[key] = expandRecurringEvents(key, dataToSave);
   }
 
   function isToday(y, m, day) {
@@ -191,13 +237,6 @@ const db = getFirestore(app);
 
   function getSearchQuery() {
     return (searchInput?.value || '').trim().toLowerCase();
-  }
-
-  function dayMatchesSearch(entry = {}) {
-    const query = getSearchQuery();
-    if (!query) return true;
-    const events = Array.isArray(entry.events) ? entry.events : [];
-    return events.some(ev => getEventMatchText(ev).includes(query));
   }
 
   function monthlyCompletionTotal(monthKeyValue) {
@@ -307,7 +346,7 @@ const db = getFirestore(app);
       const colorObj = COLORS.find(c => c.id === ev.color) || COLORS[0];
       chip.style.background = colorObj.hex;
       const meta = ev.allDay ? 'All day' : (ev.time ? ev.time : '');
-      const repeatLabel = ev.repeat && ev.repeat !== 'none' ? ` · ${ev.repeat}` : '';
+      const repeatLabel = ev.repeat === 'yearly' ? ' 🎂' : (ev.repeat && ev.repeat !== 'none' ? ` · ${ev.repeat}` : '');
       chip.textContent = `${meta ? meta + ' ' : ''}${ev.title}${repeatLabel}`;
       chips.appendChild(chip);
     });
@@ -349,6 +388,7 @@ const db = getFirestore(app);
     cache = {};
     cellRefs = {};
     monthOffset = 0;
+    fullCalendar = {};
 
     for (let i = 0; i < 6; i++) {
       await appendNextMonth();
@@ -422,61 +462,11 @@ const db = getFirestore(app);
     resetForm();
   }
 
-  let dragStartY = null;
-  let dragDeltaY = 0;
-
-  function handleSheetPointerDown(event) {
-    if (!sheet.classList.contains('open')) return;
-    if (event.target.closest('button, input, textarea, select')) return;
-
-    dragStartY = event.clientY;
-    dragDeltaY = 0;
-    sheet.style.transition = 'none';
-    sheet.setPointerCapture?.(event.pointerId);
-  }
-
-  function handleSheetPointerMove(event) {
-    if (dragStartY === null) return;
-
-    const delta = event.clientY - dragStartY;
-    if (delta <= 0) {
-      sheet.style.transform = 'translateY(0px)';
-      return;
-    }
-
-    dragDeltaY = Math.min(delta, 220);
-    sheet.style.transform = `translateY(${dragDeltaY}px)`;
-  }
-
-  function handleSheetPointerUp(event) {
-    if (dragStartY === null) return;
-
-    const shouldClose = dragDeltaY > 120;
-    sheet.style.transition = '';
-    sheet.style.transform = '';
-    dragStartY = null;
-    dragDeltaY = 0;
-
-    if (event.pointerId !== undefined) {
-      try {
-        sheet.releasePointerCapture?.(event.pointerId);
-      } catch (e) {}
-    }
-
-    if (shouldClose) {
-      closeSheet();
-    }
-  }
-
   backdrop.addEventListener('click', closeSheet);
   document.getElementById('sheet-close').addEventListener('click', closeSheet);
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && sheet.classList.contains('open')) closeSheet();
   });
-  sheet.addEventListener('pointerdown', handleSheetPointerDown);
-  sheet.addEventListener('pointermove', handleSheetPointerMove);
-  sheet.addEventListener('pointerup', handleSheetPointerUp);
-  sheet.addEventListener('pointercancel', handleSheetPointerUp);
 
   function currentMonthKeyFromActive() {
     return activeDateKey.slice(0, 7);
@@ -527,7 +517,10 @@ const db = getFirestore(app);
         meta.className = 'event-meta';
         const detailParts = [...metaParts];
         if (ev.allDay) detailParts.unshift('All day');
-        if (ev.repeat && ev.repeat !== 'none') detailParts.push(`Repeats ${ev.repeat}`);      if (ev.reminder && ev.reminder !== 'none') detailParts.push(`Alert ${ev.reminder}`);        meta.textContent = detailParts.join(' · ');
+        if (ev.repeat === 'yearly') detailParts.push('🎂 Yearly Birthday');
+        else if (ev.repeat && ev.repeat !== 'none') detailParts.push(`Repeats ${ev.repeat}`);
+        if (ev.reminder && ev.reminder !== 'none') detailParts.push(`Alert ${ev.reminder}`);
+        meta.textContent = detailParts.join(' · ');
         info.appendChild(meta);
       }
 
@@ -603,7 +596,6 @@ const db = getFirestore(app);
     await renderSheetContents();
   }
 
-  // Instant local update + background cloud sync
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const title = titleInput.value.trim();
@@ -613,6 +605,11 @@ const db = getFirestore(app);
       return;
     }
     formErr.style.display = 'none';
+
+    // Request notification permission during user interaction if a reminder is chosen
+    if (reminderInput.value !== 'none' && 'Notification' in window && Notification.permission === 'default') {
+      Notification.requestPermission();
+    }
 
     const monthKey = currentMonthKeyFromActive();
     const dayNumber = currentDayFromActive();
@@ -756,7 +753,7 @@ const db = getFirestore(app);
       hideAuth();
       authForm.reset();
       updateAuthState();
-      await reloadEntireCalendar(); // Reloads calendar from user's cloud account!
+      await reloadEntireCalendar();
     } catch (error) {
       console.error("Firebase Auth Error:", error.code, error.message);
       let message = 'Something went wrong. Please try again.';
@@ -858,7 +855,8 @@ const db = getFirestore(app);
     });
   }
 
-  function getReminderMilliseconds(reminderStr) {    const match = reminderStr.match(/(\d+)([mhd\w])/);
+  function getReminderMilliseconds(reminderStr) {
+    const match = reminderStr.match(/(\d+)([mhd\w])/);
     if (!match) return 0;
     const [, num, unit] = match;
     const n = parseInt(num);
@@ -869,48 +867,51 @@ const db = getFirestore(app);
     return 0;
   }
 
-  function showReminder(event, eventDate) {
+  function showReminder(event) {
     if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(`Reminder: ${event.title}`, {
         body: event.location ? `📍 ${event.location}` : 'Your event is coming up!',
-        icon: 'data:image/svg+xml,<svg viewBox=\"0 0 64 64\" xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"32\" cy=\"32\" r=\"30\" fill=\"%238b5cf6\"/><path d=\"M32 16v20m10-10H22\" stroke=\"white\" stroke-width=\"3\" stroke-linecap=\"round\"/></svg>',
+        icon: 'data:image/svg+xml,<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><circle cx="32" cy="32" r="30" fill="%238b5cf6"/><path d="M32 16v20m10-10H22" stroke="white" stroke-width="3" stroke-linecap="round"/></svg>',
         tag: `nocturna-${event.id}`,
         requireInteraction: false
       });
     }
   }
 
+  // Fixed Date Parsing: Combines monthKey ("YYYY-MM") + dayKey ("DD")
   function checkReminders() {
     const now = new Date();
     Object.entries(cache).forEach(([monthKey, monthData]) => {
+      const [y, m] = monthKey.split('-').map(Number);
+      
       Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
         if (!dayEntry.events) return;
+        const d = Number(dayKey);
+
         dayEntry.events.forEach(event => {
           if (!event.reminder || event.reminder === 'none') return;
           const reminderMs = getReminderMilliseconds(event.reminder);
-          const [y, m, d] = monthKey.split('-').map(Number);
           const eventDate = new Date(y, m - 1, d);
+
           if (event.time) {
             const [h, mm] = event.time.split(':').map(Number);
             eventDate.setHours(h, mm, 0, 0);
           } else {
             eventDate.setHours(9, 0, 0, 0);
           }
+
           const reminderTime = new Date(eventDate.getTime() - reminderMs);
           const timeDiff = Math.abs(now.getTime() - reminderTime.getTime());
+
           if (timeDiff < 60000 && reminderTime <= now && now < eventDate) {
-            showReminder(event, eventDate);
+            showReminder(event);
           }
         });
       });
     });
   }
 
-  if ('Notification' in window && Notification.permission === 'default') {
-    Notification.requestPermission();
-  }
-
-  setInterval(checkReminders, 60000);
+  setInterval(checkReminders, 10000);
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
@@ -918,11 +919,5 @@ const db = getFirestore(app);
     });
   }
 
-  async function initCalendar() {
-    setAuthMode('login');
-    // Don't call updateAuthState() here - let onAuthStateChanged handle it
-    // This prevents the auth overlay from showing before Firebase restores the session
-  }
-
-  initCalendar();
+  setAuthMode('login');
 })();
