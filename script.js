@@ -374,6 +374,9 @@ const db = getFirestore(app);
 
   backdrop.addEventListener('click', closeSheet);
   document.getElementById('sheet-close').addEventListener('click', closeSheet);
+  document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && sheet.classList.contains('open')) closeSheet();
+  });
 
   function currentMonthKeyFromActive() {
     return activeDateKey.slice(0, 7);
@@ -573,6 +576,17 @@ const db = getFirestore(app);
   }
 
   authTabs.forEach(tab => tab.addEventListener('click', () => setAuthMode(tab.dataset.mode)));
+
+  document.querySelectorAll('.password-toggle').forEach((button) => {
+    button.addEventListener('click', () => {
+      const target = document.getElementById(button.dataset.target);
+      if (!target) return;
+      const show = target.type === 'password';
+      target.type = show ? 'text' : 'password';
+      button.textContent = show ? 'Hide' : 'Show';
+      button.setAttribute('aria-label', show ? 'Hide password' : 'Show password');
+    });
+  });
 
   function showAuth() {
     authOverlay.classList.add('visible');

@@ -517,6 +517,31 @@ form.event-form {
   font-size: 15px;
 }
 
+.password-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.password-wrap input {
+  padding-right: 62px;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
 .field input[type="color"] {
   min-height: 46px;
   padding: 4px 8px;
@@ -692,6 +717,10 @@ form.event-form {
   color: var(--text-primary);
 }
 
+.auth-field .password-wrap input {
+  padding-right: 60px;
+}
+
 .auth-field input:focus {
   outline: none;
   border-color: var(--accent-purple);
@@ -715,4 +744,65 @@ form.event-form {
   border: 1px solid rgba(248, 113, 113, 0.2);
   border-radius: 10px;
   padding: 8px 10px;
+}
+
+@media (max-width: 480px) {
+  header.top {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .brand-copy h1 {
+    font-size: 18px;
+  }
+
+  .brand-copy p {
+    font-size: 11px;
+  }
+
+  .top-actions {
+    gap: 8px;
+  }
+
+  .primary-button, .ghost-button {
+    padding: 8px 10px;
+    font-size: 12px;
+  }
+
+  .month-section {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .grid {
+    gap: 4px;
+    padding-left: 2px;
+    padding-right: 2px;
+  }
+
+  .cell {
+    min-height: 78px;
+    padding: 5px 4px 3px;
+    border-radius: 10px;
+  }
+
+  .month-sticky h2 {
+    font-size: 15px;
+  }
+
+  .sheet {
+    padding-left: 14px;
+    padding-right: 14px;
+    max-height: 82vh;
+    border-radius: 18px 18px 0 0;
+  }
+
+  .row2 {
+    grid-template-columns: 1fr;
+  }
+
+  .auth-card {
+    width: min(100vw - 20px, 420px);
+    padding: 18px 16px 16px;
+  }
 }

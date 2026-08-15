@@ -42,11 +42,17 @@
       </div>
       <div class="auth-field">
         <label for="auth-password">Password</label>
-        <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password (min 6 chars)">
+        <div class="password-wrap">
+          <input id="auth-password" type="password" autocomplete="current-password" placeholder="Password (min 6 chars)">
+          <button type="button" class="password-toggle" data-target="auth-password" aria-label="Show password">Show</button>
+        </div>
       </div>
       <div class="auth-field" id="auth-confirm-wrap" style="display:none;">
         <label for="auth-confirm">Confirm password</label>
-        <input id="auth-confirm" type="password" autocomplete="new-password" placeholder="Repeat password">
+        <div class="password-wrap">
+          <input id="auth-confirm" type="password" autocomplete="new-password" placeholder="Repeat password">
+          <button type="button" class="password-toggle" data-target="auth-confirm" aria-label="Show confirm password">Show</button>
+        </div>
       </div>
       <div class="auth-error" id="auth-error"></div>
       <button type="submit" class="auth-submit" id="auth-submit">Log in</button>
