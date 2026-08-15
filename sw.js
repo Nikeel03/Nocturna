@@ -1,10 +1,13 @@
-const CACHE_NAME = 'nocturna-v2';
+const CACHE_NAME = 'nocturna-v3';
 const APP_SHELL = [
   './',
   './index.html',
   './style.css',
   './script.js',
-  './manifest.json'
+  './manifest.json',
+  './icon.png',
+  './icon-192.png',
+  './icon-512.png'
 ];
 
 self.addEventListener('install', (event) => {
