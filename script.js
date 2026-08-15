@@ -901,33 +901,38 @@ const db = getFirestore(app);
   function checkReminders() {
     const now = new Date();
 
-    Object.keys(cellRefs).forEach(dKey => {
-      const [y, m, d] = dKey.split('-').map(Number);
-      const dayData = getDayData(y, m - 1, d);
+    // Check ALL events in globalCalendar, not just visible cells
+    Object.entries(globalCalendar).forEach(([monthKey, monthData]) => {
+      Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
+        if (!dayEntry.events) return;
 
-      (dayData.events || []).forEach(event => {
-        if (!event.reminder || event.reminder === 'none') return;
-        const reminderId = `${event.id}_${dKey}`;
-        if (triggeredReminders.has(reminderId)) return;
+        dayEntry.events.forEach(event => {
+          if (!event.reminder || event.reminder === 'none') return;
+          const reminderId = `${event.id}_${monthKey}_${dayKey}`;
+          if (triggeredReminders.has(reminderId)) return;
 
-        const reminderMs = getReminderMilliseconds(event.reminder);
-        const eventDate = new Date(y, m - 1, d);
+          const reminderMs = getReminderMilliseconds(event.reminder);
+          const [y, m] = monthKey.split('-').map(Number);
+          const d = Number(dayKey);
+          const eventDate = new Date(y, m - 1, d);
 
-        if (event.time) {
-          const [h, mm] = event.time.split(':').map(Number);
-          eventDate.setHours(h, mm, 0, 0);
-        } else {
-          eventDate.setHours(9, 0, 0, 0);
-        }
+          if (event.time) {
+            const [h, mm] = event.time.split(':').map(Number);
+            eventDate.setHours(h, mm, 0, 0);
+          } else {
+            eventDate.setHours(9, 0, 0, 0);
+          }
 
-        const reminderTime = new Date(eventDate.getTime() - reminderMs);
-        const diff = now.getTime() - reminderTime.getTime();
+          const reminderTime = new Date(eventDate.getTime() - reminderMs);
+          const diff = now.getTime() - reminderTime.getTime();
 
-        // Trigger if current time is within 3 minutes of scheduled reminder
-        if (diff >= 0 && diff < 180000 && now < eventDate) {
-          triggeredReminders.add(reminderId);
-          triggerNotification(event, eventDate);
-        }
+          // Trigger if current time is within 3 minutes of scheduled reminder
+          if (diff >= 0 && diff < 180000 && now < eventDate) {
+            console.log(`🔔 Reminder triggered for: ${event.title} (${event.reminder})`);
+            triggeredReminders.add(reminderId);
+            triggerNotification(event, eventDate);
+          }
+        });
       });
     });
   }
