@@ -1,4 +1,4 @@
-const CACHE_NAME = 'nocturna-v1';
+const CACHE_NAME = 'nocturna-v2';
 const APP_SHELL = [
   './',
   './index.html',
