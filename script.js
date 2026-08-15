@@ -63,14 +63,17 @@ const db = getFirestore(app);
   const searchInput = document.getElementById('search-input');
   const todayButton = document.getElementById('today-button');
   
-  let fullCalendar = {};
-  let cache = {};
+  let globalCalendar = {}; // Holds all months for the current user
   let cellRefs = {};
+  let renderedMonths = new Set();
   let selectedColor = 'violet';
   let editingId = null;
+  let editingOriginalDate = null;
   let activeDateKey = null;
   let monthOffset = 0;
   let isLoading = false;
+  let triggeredReminders = new Set();
+  let swRegistration = null;
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function monthKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
@@ -90,123 +93,111 @@ const db = getFirestore(app);
     return session && session.username ? session.username.toLowerCase() : 'guest';
   }
 
-  async function loadUserCalendarFromFirestore() {
-    if (!auth.currentUser) return {};
+  // --- Firestore & Storage Sync ---
+  async function fetchEntireCalendarFromCloud() {
+    if (!auth.currentUser) {
+      try {
+        const raw = localStorage.getItem(`nocturna:${currentUserKey()}:full_calendar`);
+        return raw ? JSON.parse(raw) : {};
+      } catch (e) { return {}; }
+    }
+
     try {
       const ref = doc(db, 'users', auth.currentUser.uid);
       const snap = await getDoc(ref);
-      return snap.exists() ? (snap.data().calendar || {}) : {};
+      if (snap.exists() && snap.data().calendar) {
+        return snap.data().calendar;
+      }
     } catch (e) {
-      console.warn('Firestore load error:', e);
-      return {};
+      console.warn('Firestore load failed:', e);
+    }
+    return {};
+  }
+
+  async function syncCalendarToCloud() {
+    localStorage.setItem(`nocturna:${currentUserKey()}:full_calendar`, JSON.stringify(globalCalendar));
+
+    if (auth.currentUser) {
+      try {
+        const ref = doc(db, 'users', auth.currentUser.uid);
+        const username = getSession()?.username || auth.currentUser.email?.split('@')[0] || 'Nocturna user';
+        await setDoc(ref, {
+          username,
+          email: auth.currentUser.email || deriveNocturnaEmail(username),
+          calendar: globalCalendar
+        }, { merge: true });
+      } catch (e) {
+        console.warn('Sync failed', e);
+      }
     }
   }
 
-  async function saveMonthToFirestore(key, data) {
-    if (!auth.currentUser) return;
-    try {
-      const ref = doc(db, 'users', auth.currentUser.uid);
-      const username = getSession()?.username || auth.currentUser.email?.split('@')[0] || 'Nocturna user';
-      await setDoc(ref, {
-        username,
-        email: auth.currentUser.email || deriveNocturnaEmail(username),
-        calendar: { [key]: data }
-      }, { merge: true });
-    } catch (e) {
-      console.warn('Firestore sync failed', e);
-    }
-  }
+  // --- Core Calculation: Gets computed day data with Yearly / Repeat events ---
+  function getDayData(y, m, day) {
+    const dKey = dateKey(y, m, day);
+    const mKey = dKey.slice(0, 7);
+    const dNum = pad(day);
 
-  function readLocal(key) {
-    try {
-      const raw = localStorage.getItem(currentUserKey() + ':month:' + key);
-      return raw ? JSON.parse(raw) : {};
-    } catch (e) { return {}; }
-  }
+    const baseEntry = (globalCalendar[mKey] && globalCalendar[mKey][dNum]) ? JSON.parse(JSON.stringify(globalCalendar[mKey][dNum])) : { events: [], complete: false };
+    const directEvents = baseEntry.events || [];
 
-  function writeLocal(key, data) {
-    try { localStorage.setItem(currentUserKey() + ':month:' + key, JSON.stringify(data)); } catch (e) {}
-  }
+    // Scan all other months for recurring events matching this day
+    const recurringEvents = [];
 
-  // Merges direct month events with recurring/yearly birthday events from other months
-  function expandRecurringEvents(targetKey, baseData) {
-    const [targetYear, targetMonth] = targetKey.split('-').map(Number);
-    const expanded = JSON.parse(JSON.stringify(baseData || {}));
+    Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
+      const [srcY, srcM] = srcMKey.split('-').map(Number);
 
-    Object.entries(fullCalendar).forEach(([srcMonthKey, srcMonthData]) => {
-      const [srcYear, srcMonth] = srcMonthKey.split('-').map(Number);
-      
-      Object.entries(srcMonthData).forEach(([dayNum, dayEntry]) => {
-        if (!dayEntry.events) return;
+      Object.entries(monthData).forEach(([srcDayNum, srcDayEntry]) => {
+        if (!srcDayEntry.events) return;
 
-        dayEntry.events.forEach(ev => {
+        srcDayEntry.events.forEach(ev => {
           if (!ev.repeat || ev.repeat === 'none') return;
+          const origDay = Number(srcDayNum);
 
-          let shouldInclude = false;
+          let isMatch = false;
 
           if (ev.repeat === 'yearly') {
-            // Same month, same day, any subsequent or previous year
-            if (srcMonth === targetMonth && srcYear <= targetYear) {
-              shouldInclude = true;
+            // Same month and day, across any year
+            if (srcM === (m + 1) && origDay === day) {
+              isMatch = true;
             }
           } else if (ev.repeat === 'monthly') {
-            // Same day, every month
-            const srcDate = new Date(srcYear, srcMonth - 1, Number(dayNum));
-            const curDate = new Date(targetYear, targetMonth - 1, Number(dayNum));
-            if (curDate >= srcDate) shouldInclude = true;
+            // Same day every month
+            if (origDay === day) {
+              const srcDate = new Date(srcY, srcM - 1, origDay);
+              const targetDate = new Date(y, m, day);
+              if (targetDate >= srcDate) isMatch = true;
+            }
+          } else if (ev.repeat === 'daily') {
+            const srcDate = new Date(srcY, srcM - 1, origDay);
+            const targetDate = new Date(y, m, day);
+            if (targetDate >= srcDate) isMatch = true;
+          } else if (ev.repeat === 'weekly') {
+            const srcDate = new Date(srcY, srcM - 1, origDay);
+            const targetDate = new Date(y, m, day);
+            if (targetDate >= srcDate && targetDate.getDay() === srcDate.getDay()) {
+              isMatch = true;
+            }
           }
 
-          if (shouldInclude) {
-            if (!expanded[dayNum]) expanded[dayNum] = { events: [], complete: false };
-            const exists = expanded[dayNum].events.some(existing => existing.id === ev.id);
-            if (!exists) {
-              expanded[dayNum].events.push({ ...ev, isRecurringInstance: true });
-            }
+          if (isMatch) {
+            // If it originated in this exact month & day, don't duplicate it
+            if (srcMKey === mKey && origDay === day) return;
+
+            recurringEvents.push({
+              ...ev,
+              isRecurringInstance: true,
+              originDate: `${srcMKey}-${pad(origDay)}`
+            });
           }
         });
       });
     });
 
-    return expanded;
-  }
-
-  async function loadMonth(key) {
-    let rawData = readLocal(key);
-
-    if (auth.currentUser && Object.keys(fullCalendar).length === 0) {
-      try {
-        fullCalendar = await loadUserCalendarFromFirestore();
-      } catch (e) {}
-    }
-
-    if (fullCalendar[key]) {
-      rawData = fullCalendar[key];
-      writeLocal(key, rawData);
-    }
-
-    cache[key] = expandRecurringEvents(key, rawData);
-    return cache[key];
-  }
-
-  function saveMonth(key) {
-    const dataToSave = {};
-    const currentCached = cache[key] || {};
-
-    // Do not save auto-generated recurring copies back into the persistent document
-    Object.keys(currentCached).forEach(dayKey => {
-      const dayData = currentCached[dayKey];
-      const directEvents = (dayData.events || []).filter(ev => !ev.isRecurringInstance);
-      dataToSave[dayKey] = { ...dayData, events: directEvents };
-    });
-
-    fullCalendar[key] = dataToSave;
-    writeLocal(key, dataToSave);
-
-    if (auth.currentUser) {
-      saveMonthToFirestore(key, dataToSave);
-    }
-
-    cache[key] = expandRecurringEvents(key, dataToSave);
+    return {
+      ...baseEntry,
+      events: [...directEvents, ...recurringEvents]
+    };
   }
 
   function isToday(y, m, day) {
@@ -240,7 +231,7 @@ const db = getFirestore(app);
   }
 
   function monthlyCompletionTotal(monthKeyValue) {
-    const monthData = cache[monthKeyValue] || {};
+    const monthData = globalCalendar[monthKeyValue] || {};
     const days = Object.keys(monthData).filter(key => key !== 'meta');
     let doneCount = 0;
     days.forEach(dayKey => {
@@ -250,11 +241,18 @@ const db = getFirestore(app);
     return doneCount;
   }
 
+  function repaintAllVisibleCells() {
+    Object.keys(cellRefs).forEach(dKey => {
+      const [y, m, d] = dKey.split('-').map(Number);
+      const computedData = getDayData(y, m - 1, d);
+      paintCell(dKey, computedData);
+    });
+  }
+
   async function renderMonth(baseDate) {
     const y = baseDate.getFullYear();
     const m = baseDate.getMonth();
     const key = monthKey(baseDate);
-    const data = await loadMonth(key);
 
     const section = document.createElement('div');
     section.className = 'month-section';
@@ -305,7 +303,9 @@ const db = getFirestore(app);
       cellRefs[dKey] = cell;
       cell.addEventListener('click', () => openSheet(y, m, day));
       grid.appendChild(cell);
-      paintCell(dKey, data[pad(day)]);
+
+      const dayData = getDayData(y, m, day);
+      paintCell(dKey, dayData);
     }
 
     section.appendChild(grid);
@@ -373,7 +373,11 @@ const db = getFirestore(app);
       targetDate.setDate(1);
       targetDate.setMonth(targetDate.getMonth() + monthOffset);
 
-      await renderMonth(targetDate);
+      const mKey = monthKey(targetDate);
+      if (!renderedMonths.has(mKey)) {
+        renderedMonths.add(mKey);
+        await renderMonth(targetDate);
+      }
       monthOffset++;
     } catch (e) {
       console.error('Error rendering month:', e);
@@ -385,10 +389,12 @@ const db = getFirestore(app);
 
   async function reloadEntireCalendar() {
     listEl.innerHTML = '';
-    cache = {};
     cellRefs = {};
+    renderedMonths.clear();
     monthOffset = 0;
-    fullCalendar = {};
+
+    // Load full calendar from cloud first
+    globalCalendar = await fetchEntireCalendarFromCloud();
 
     for (let i = 0; i < 6; i++) {
       await appendNextMonth();
@@ -449,7 +455,7 @@ const db = getFirestore(app);
     resetForm();
     const dObj = new Date(y, m, day);
     sheetDate.textContent = dObj.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
-    await renderSheetContents();
+    renderSheetContents();
     backdrop.classList.add('open');
     sheet.classList.add('open');
   }
@@ -468,28 +474,18 @@ const db = getFirestore(app);
     if (event.key === 'Escape' && sheet.classList.contains('open')) closeSheet();
   });
 
-  function currentMonthKeyFromActive() {
-    return activeDateKey.slice(0, 7);
-  }
-  function currentDayFromActive() {
-    return activeDateKey.slice(-2);
-  }
-
-  async function renderSheetContents() {
-    const monthKey = currentMonthKeyFromActive();
-    const dayNumber = currentDayFromActive();
-    const data = cache[monthKey] || {};
-    const entry = data[dayNumber] || { events: [], complete: false };
-
+  function renderSheetContents() {
     const [sy, sm, sd] = activeDateKey.split('-').map(Number);
+    const dayData = getDayData(sy, sm - 1, sd);
+
     const pastAuto = isDayPast(sy, sm - 1, sd);
-    const isOver = !!entry.complete || pastAuto;
+    const isOver = !!dayData.complete || pastAuto;
     doneSwitch.classList.toggle('on', isOver);
-    doneLabel.textContent = pastAuto ? 'This day has passed' : (entry.complete ? 'Day complete' : 'Mark day complete');
-    dayColorPicker.value = entry.dayColor || '#8b5cf6';
+    doneLabel.textContent = pastAuto ? 'This day has passed' : (dayData.complete ? 'Day complete' : 'Mark day complete');
+    dayColorPicker.value = dayData.dayColor || '#8b5cf6';
 
     eventList.innerHTML = '';
-    const events = entry.events || [];
+    const events = dayData.events || [];
     emptyHint.style.display = events.length ? 'none' : 'block';
 
     events.forEach(ev => {
@@ -538,7 +534,7 @@ const db = getFirestore(app);
       const delBtn = document.createElement('div');
       delBtn.className = 'icon-btn';
       delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
-      delBtn.addEventListener('click', () => deleteEvent(ev.id));
+      delBtn.addEventListener('click', () => deleteEvent(ev));
       actions.appendChild(delBtn);
 
       row.appendChild(actions);
@@ -555,6 +551,7 @@ const db = getFirestore(app);
 
   function resetForm() {
     editingId = null;
+    editingOriginalDate = null;
     titleInput.value = '';
     timeInput.value = '';
     locInput.value = '';
@@ -570,6 +567,7 @@ const db = getFirestore(app);
 
   function startEdit(ev) {
     editingId = ev.id;
+    editingOriginalDate = ev.originDate || activeDateKey;
     titleInput.value = ev.title;
     timeInput.value = ev.time || '';
     locInput.value = ev.location || '';
@@ -584,16 +582,17 @@ const db = getFirestore(app);
 
   cancelEditBtn.addEventListener('click', resetForm);
 
-  async function deleteEvent(id) {
-    const monthKey = currentMonthKeyFromActive();
-    const dayNumber = currentDayFromActive();
-    const data = cache[monthKey];
-    if (!data || !data[dayNumber]) return;
+  async function deleteEvent(ev) {
+    const targetDate = ev.originDate || activeDateKey;
+    const targetMonth = targetDate.slice(0, 7);
+    const targetDay = targetDate.slice(-2);
 
-    data[dayNumber].events = (data[dayNumber].events || []).filter(e => e.id !== id);
-    saveMonth(monthKey);
-    paintCell(activeDateKey, data[dayNumber]);
-    await renderSheetContents();
+    if (globalCalendar[targetMonth] && globalCalendar[targetMonth][targetDay]) {
+      globalCalendar[targetMonth][targetDay].events = (globalCalendar[targetMonth][targetDay].events || []).filter(e => e.id !== ev.id);
+      await syncCalendarToCloud();
+      repaintAllVisibleCells();
+      renderSheetContents();
+    }
   }
 
   form.addEventListener('submit', async (e) => {
@@ -606,18 +605,23 @@ const db = getFirestore(app);
     }
     formErr.style.display = 'none';
 
-    // Request notification permission during user interaction if a reminder is chosen
-    if (reminderInput.value !== 'none' && 'Notification' in window && Notification.permission === 'default') {
-      Notification.requestPermission();
+    // Trigger Notification Request directly on form submit (user gesture)
+    if (reminderInput.value !== 'none' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission();
+      }
     }
 
-    const monthKey = currentMonthKeyFromActive();
-    const dayNumber = currentDayFromActive();
-    if (!cache[monthKey]) cache[monthKey] = {};
-    if (!cache[monthKey][dayNumber]) cache[monthKey][dayNumber] = { events: [], complete: false };
+    const saveTargetDate = editingOriginalDate || activeDateKey;
+    const monthKey = saveTargetDate.slice(0, 7);
+    const dayNumber = saveTargetDate.slice(-2);
 
-    const entry = cache[monthKey][dayNumber];
+    if (!globalCalendar[monthKey]) globalCalendar[monthKey] = {};
+    if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], complete: false };
+
+    const entry = globalCalendar[monthKey][dayNumber];
     if (dayColorPicker.value) entry.dayColor = dayColorPicker.value;
+
     const normalizedRepeat = repeatInput.value || 'none';
     const allDay = !!allDayInput.checked;
     const reminder = reminderInput.value || 'none';
@@ -625,31 +629,48 @@ const db = getFirestore(app);
     if (editingId) {
       const idx = entry.events.findIndex(ev => ev.id === editingId);
       if (idx > -1) {
-        entry.events[idx] = { ...entry.events[idx], title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, reminder, location: locInput.value.trim(), color: selectedColor };
+        entry.events[idx] = { 
+          ...entry.events[idx], 
+          title, 
+          time: allDay ? '' : timeInput.value, 
+          allDay, 
+          repeat: normalizedRepeat, 
+          reminder, 
+          location: locInput.value.trim(), 
+          color: selectedColor 
+        };
       }
     } else {
       entry.events.push({
         id: 'e' + Date.now() + Math.random().toString(36).slice(2, 7),
-        title, time: allDay ? '' : timeInput.value, allDay, repeat: normalizedRepeat, reminder, location: locInput.value.trim(), color: selectedColor
+        title, 
+        time: allDay ? '' : timeInput.value, 
+        allDay, 
+        repeat: normalizedRepeat, 
+        reminder, 
+        location: locInput.value.trim(), 
+        color: selectedColor
       });
     }
 
-    saveMonth(monthKey);
-    paintCell(activeDateKey, entry);
+    await syncCalendarToCloud();
+    repaintAllVisibleCells();
     resetForm();
-    await renderSheetContents();
+    renderSheetContents();
   });
 
   doneSwitch.addEventListener('click', async () => {
-    const monthKey = currentMonthKeyFromActive();
-    const dayNumber = currentDayFromActive();
-    if (!cache[monthKey]) cache[monthKey] = {};
-    if (!cache[monthKey][dayNumber]) cache[monthKey][dayNumber] = { events: [], complete: false };
+    const monthKey = activeDateKey.slice(0, 7);
+    const dayNumber = activeDateKey.slice(-2);
 
-    const entry = cache[monthKey][dayNumber];
+    if (!globalCalendar[monthKey]) globalCalendar[monthKey] = {};
+    if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], complete: false };
+
+    const entry = globalCalendar[monthKey][dayNumber];
     entry.complete = !entry.complete;
-    saveMonth(monthKey);
-    paintCell(activeDateKey, entry);
+
+    await syncCalendarToCloud();
+    repaintAllVisibleCells();
     doneSwitch.classList.toggle('on', entry.complete);
     doneLabel.textContent = entry.complete ? 'Day complete' : 'Mark day complete';
   });
@@ -832,14 +853,7 @@ const db = getFirestore(app);
   });
 
   if (searchInput) {
-    searchInput.addEventListener('input', () => {
-      Object.keys(cellRefs).forEach(dKey => {
-        const monthKeyValue = dKey.slice(0, 7);
-        const dayNumber = dKey.slice(-2);
-        const entry = (cache[monthKeyValue] && cache[monthKeyValue][dayNumber]) || { events: [] };
-        paintCell(dKey, entry);
-      });
-    });
+    searchInput.addEventListener('input', repaintAllVisibleCells);
   }
 
   if (todayButton) {
@@ -855,6 +869,7 @@ const db = getFirestore(app);
     });
   }
 
+  // --- Real-time Notification Engine ---
   function getReminderMilliseconds(reminderStr) {
     const match = reminderStr.match(/(\d+)([mhd\w])/);
     if (!match) return 0;
@@ -867,55 +882,63 @@ const db = getFirestore(app);
     return 0;
   }
 
-  function showReminder(event) {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(`Reminder: ${event.title}`, {
-        body: event.location ? `📍 ${event.location}` : 'Your event is coming up!',
-        icon: 'data:image/svg+xml,<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><circle cx="32" cy="32" r="30" fill="%238b5cf6"/><path d="M32 16v20m10-10H22" stroke="white" stroke-width="3" stroke-linecap="round"/></svg>',
-        tag: `nocturna-${event.id}`,
-        requireInteraction: false
-      });
+  function triggerNotification(event, dateObj) {
+    const title = `Reminder: ${event.title}`;
+    const options = {
+      body: `${event.time ? formatTime(event.time) + ' · ' : ''}${event.location || 'Upcoming event'}`,
+      tag: `nocturna-${event.id}`,
+      icon: 'data:image/svg+xml,<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><circle cx="32" cy="32" r="30" fill="%238b5cf6"/></svg>'
+    };
+
+    // ServiceWorker (Mobile/PWA preferred)
+    if (swRegistration && swRegistration.showNotification) {
+      swRegistration.showNotification(title, options);
+    } else if ('Notification' in window && Notification.permission === 'granted') {
+      new Notification(title, options);
     }
   }
 
-  // Fixed Date Parsing: Combines monthKey ("YYYY-MM") + dayKey ("DD")
   function checkReminders() {
     const now = new Date();
-    Object.entries(cache).forEach(([monthKey, monthData]) => {
-      const [y, m] = monthKey.split('-').map(Number);
-      
-      Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
-        if (!dayEntry.events) return;
-        const d = Number(dayKey);
 
-        dayEntry.events.forEach(event => {
-          if (!event.reminder || event.reminder === 'none') return;
-          const reminderMs = getReminderMilliseconds(event.reminder);
-          const eventDate = new Date(y, m - 1, d);
+    Object.keys(cellRefs).forEach(dKey => {
+      const [y, m, d] = dKey.split('-').map(Number);
+      const dayData = getDayData(y, m - 1, d);
 
-          if (event.time) {
-            const [h, mm] = event.time.split(':').map(Number);
-            eventDate.setHours(h, mm, 0, 0);
-          } else {
-            eventDate.setHours(9, 0, 0, 0);
-          }
+      (dayData.events || []).forEach(event => {
+        if (!event.reminder || event.reminder === 'none') return;
+        const reminderId = `${event.id}_${dKey}`;
+        if (triggeredReminders.has(reminderId)) return;
 
-          const reminderTime = new Date(eventDate.getTime() - reminderMs);
-          const timeDiff = Math.abs(now.getTime() - reminderTime.getTime());
+        const reminderMs = getReminderMilliseconds(event.reminder);
+        const eventDate = new Date(y, m - 1, d);
 
-          if (timeDiff < 60000 && reminderTime <= now && now < eventDate) {
-            showReminder(event);
-          }
-        });
+        if (event.time) {
+          const [h, mm] = event.time.split(':').map(Number);
+          eventDate.setHours(h, mm, 0, 0);
+        } else {
+          eventDate.setHours(9, 0, 0, 0);
+        }
+
+        const reminderTime = new Date(eventDate.getTime() - reminderMs);
+        const diff = now.getTime() - reminderTime.getTime();
+
+        // Trigger if current time is within 3 minutes of scheduled reminder
+        if (diff >= 0 && diff < 180000 && now < eventDate) {
+          triggeredReminders.add(reminderId);
+          triggerNotification(event, eventDate);
+        }
       });
     });
   }
 
-  setInterval(checkReminders, 10000);
+  setInterval(checkReminders, 15000);
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js').catch(() => {});
+    window.addEventListener('load', async () => {
+      try {
+        swRegistration = await navigator.serviceWorker.register('./sw.js');
+      } catch (e) {}
     });
   }
 
