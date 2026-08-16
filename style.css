@@ -102,23 +102,16 @@ header.top {
   color: var(--text-muted);
 }
 
-.owl-mark {
+.brand-icon {
   width: 42px;
   height: 42px;
   border-radius: 14px;
   flex-shrink: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: block;
   background: linear-gradient(135deg, rgba(139, 92, 246, 0.25), rgba(79, 142, 247, 0.18));
   border: 1px solid rgba(255, 255, 255, 0.1);
   box-shadow: inset 0 0 18px rgba(255, 255, 255, 0.06);
-}
-
-.owl-mark svg {
-  width: 30px;
-  height: 30px;
-  display: block;
+  object-fit: cover;
 }
 
 .top-actions {
