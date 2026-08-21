@@ -12,8 +12,14 @@ import {
   setDoc, 
   getDoc 
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+import { 
+  getDatabase, 
+  ref as dbRef, 
+  onValue 
+} from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
-const firebaseConfig = {
+// 1. Primary Nocturna Firebase (Auth + Firestore)
+const nocturnaConfig = {
   apiKey: "AIzaSyAjzmlmjB73S60nUw0vPrEJXq-y3-xlrG0",
   authDomain: "nocturna-f83da.firebaseapp.com",
   projectId: "nocturna-f83da",
@@ -23,9 +29,37 @@ const firebaseConfig = {
   measurementId: "G-RWFF29S6BE"
 };
 
-const app = initializeApp(firebaseConfig);
+const app = initializeApp(nocturnaConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// 2. Secondary Bubweb Firebase Bridge (Realtime Database)
+const bubwebConfig = {
+  apiKey: "AIzaSyBxkrNYSVqVf2_7wyHl6sA7i6MQ_OY69cg",
+  authDomain: "guide-to-the-outside.firebaseapp.com",
+  databaseURL: "https://guide-to-the-outside-default-rtdb.firebaseio.com",
+  projectId: "guide-to-the-outside",
+  storageBucket: "guide-to-the-outside.firebasestorage.app",
+  messagingSenderId: "242577301245",
+  appId: "1:242577301245:web:17387fc6b1df7fa456e894"
+};
+
+let bubwebActivities = [];
+
+try {
+  const bubwebApp = initializeApp(bubwebConfig, "bubwebBridge");
+  const bubwebDb = getDatabase(bubwebApp);
+  
+  // Realtime listener to Bubweb activities
+  const activitiesRef = dbRef(bubwebDb, 'activities');
+  onValue(activitiesRef, (snapshot) => {
+    const data = snapshot.val();
+    bubwebActivities = data ? (Array.isArray(data) ? data : Object.values(data)) : [];
+    repaintAllVisibleCells();
+  });
+} catch (e) {
+  console.warn("Bubweb bridge init warning:", e);
+}
 
 (function () {
   const COLORS = [
@@ -131,6 +165,7 @@ const db = getFirestore(app);
     }
   }
 
+  // Merges Nocturna Private Events + Recurring Events + Realtime Bubweb Adventures
   function getDayData(y, m, day) {
     const dKey = dateKey(y, m, day);
     const mKey = dKey.slice(0, 7);
@@ -142,6 +177,7 @@ const db = getFirestore(app);
     const directEvents = baseEntry.events || [];
     const recurringEvents = [];
 
+    // 1. Process recurring Nocturna events
     Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
       const [srcY, srcM] = srcMKey.split('-').map(Number);
 
@@ -183,9 +219,26 @@ const db = getFirestore(app);
       });
     });
 
+    // 2. Process real-time synced Bubweb activities
+    const bubwebEvents = [];
+    bubwebActivities.forEach(act => {
+      if (act.date === dKey) {
+        bubwebEvents.push({
+          id: `bub-${act.id}`,
+          title: `🎈 ${act.name}`,
+          time: act.time || '',
+          allDay: !act.time,
+          location: 'BubAdventure',
+          color: 'pink',
+          isBubwebSynced: true,
+          completed: !!act.completed
+        });
+      }
+    });
+
     return {
       ...baseEntry,
-      events: [...directEvents, ...recurringEvents]
+      events: [...directEvents, ...recurringEvents, ...bubwebEvents]
     };
   }
 
@@ -526,17 +579,27 @@ const db = getFirestore(app);
       const actions = document.createElement('div');
       actions.className = 'event-actions';
 
-      const editBtn = document.createElement('div');
-      editBtn.className = 'icon-btn';
-      editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
-      editBtn.addEventListener('click', () => startEdit(ev));
-      actions.appendChild(editBtn);
+      // Read-only actions for synced Bubweb items
+      if (ev.isBubwebSynced) {
+        const badge = document.createElement('span');
+        badge.style.fontSize = '11px';
+        badge.style.color = 'var(--accent-purple)';
+        badge.style.fontWeight = '700';
+        badge.textContent = 'Bubweb';
+        actions.appendChild(badge);
+      } else {
+        const editBtn = document.createElement('div');
+        editBtn.className = 'icon-btn';
+        editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
+        editBtn.addEventListener('click', () => startEdit(ev));
+        actions.appendChild(editBtn);
 
-      const delBtn = document.createElement('div');
-      delBtn.className = 'icon-btn';
-      delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
-      delBtn.addEventListener('click', () => deleteEvent(ev));
-      actions.appendChild(delBtn);
+        const delBtn = document.createElement('div');
+        delBtn.className = 'icon-btn';
+        delBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"></path></svg>';
+        delBtn.addEventListener('click', () => deleteEvent(ev));
+        actions.appendChild(delBtn);
+      }
 
       row.appendChild(actions);
       eventList.appendChild(row);
