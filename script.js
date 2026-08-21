@@ -63,7 +63,7 @@ const db = getFirestore(app);
   const searchInput = document.getElementById('search-input');
   const todayButton = document.getElementById('today-button');
   
-  let globalCalendar = {}; // Holds all months for the current user
+  let globalCalendar = {}; 
   let cellRefs = {};
   let renderedMonths = new Set();
   let selectedColor = 'violet';
@@ -93,7 +93,6 @@ const db = getFirestore(app);
     return session && session.username ? session.username.toLowerCase() : 'guest';
   }
 
-  // --- Firestore & Storage Sync ---
   async function fetchEntireCalendarFromCloud() {
     if (!auth.currentUser) {
       try {
@@ -132,16 +131,15 @@ const db = getFirestore(app);
     }
   }
 
-  // --- Core Calculation: Gets computed day data with Yearly / Repeat events ---
   function getDayData(y, m, day) {
     const dKey = dateKey(y, m, day);
     const mKey = dKey.slice(0, 7);
     const dNum = pad(day);
 
-    const baseEntry = (globalCalendar[mKey] && globalCalendar[mKey][dNum]) ? JSON.parse(JSON.stringify(globalCalendar[mKey][dNum])) : { events: [], complete: false };
+    const baseEntry = (globalCalendar[mKey] && globalCalendar[mKey][dNum]) 
+      ? JSON.parse(JSON.stringify(globalCalendar[mKey][dNum])) 
+      : { events: [], complete: false };
     const directEvents = baseEntry.events || [];
-
-    // Scan all other months for recurring events matching this day
     const recurringEvents = [];
 
     Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
@@ -153,16 +151,11 @@ const db = getFirestore(app);
         srcDayEntry.events.forEach(ev => {
           if (!ev.repeat || ev.repeat === 'none') return;
           const origDay = Number(srcDayNum);
-
           let isMatch = false;
 
           if (ev.repeat === 'yearly') {
-            // Same month and day, across any year
-            if (srcM === (m + 1) && origDay === day) {
-              isMatch = true;
-            }
+            if (srcM === (m + 1) && origDay === day) isMatch = true;
           } else if (ev.repeat === 'monthly') {
-            // Same day every month
             if (origDay === day) {
               const srcDate = new Date(srcY, srcM - 1, origDay);
               const targetDate = new Date(y, m, day);
@@ -175,15 +168,11 @@ const db = getFirestore(app);
           } else if (ev.repeat === 'weekly') {
             const srcDate = new Date(srcY, srcM - 1, origDay);
             const targetDate = new Date(y, m, day);
-            if (targetDate >= srcDate && targetDate.getDay() === srcDate.getDay()) {
-              isMatch = true;
-            }
+            if (targetDate >= srcDate && targetDate.getDay() === srcDate.getDay()) isMatch = true;
           }
 
           if (isMatch) {
-            // If it originated in this exact month & day, don't duplicate it
             if (srcMKey === mKey && origDay === day) return;
-
             recurringEvents.push({
               ...ev,
               isRecurringInstance: true,
@@ -393,7 +382,6 @@ const db = getFirestore(app);
     renderedMonths.clear();
     monthOffset = 0;
 
-    // Load full calendar from cloud first
     globalCalendar = await fetchEntireCalendarFromCloud();
 
     for (let i = 0; i < 6; i++) {
@@ -430,6 +418,12 @@ const db = getFirestore(app);
   const doneSwitch = document.getElementById('done-switch');
   const doneLabel = document.getElementById('done-label');
 
+  const rangeStartInput = document.getElementById('range-start');
+  const rangeEndInput = document.getElementById('range-end');
+  const rangeColorInput = document.getElementById('range-color');
+  const rangeApplyBtn = document.getElementById('range-apply-btn');
+  const rangeClearBtn = document.getElementById('range-clear-btn');
+
   COLORS.forEach(c => {
     const sw = document.createElement('div');
     sw.className = 'swatch';
@@ -455,6 +449,13 @@ const db = getFirestore(app);
     resetForm();
     const dObj = new Date(y, m, day);
     sheetDate.textContent = dObj.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    if (rangeStartInput && rangeEndInput) {
+      rangeStartInput.value = activeDateKey;
+      const endDateObj = new Date(y, m, day + 6);
+      rangeEndInput.value = dateKey(endDateObj.getFullYear(), endDateObj.getMonth(), endDateObj.getDate());
+    }
+
     renderSheetContents();
     backdrop.classList.add('open');
     sheet.classList.add('open');
@@ -605,7 +606,6 @@ const db = getFirestore(app);
     }
     formErr.style.display = 'none';
 
-    // Trigger Notification Request directly on form submit (user gesture)
     if (reminderInput.value !== 'none' && 'Notification' in window) {
       if (Notification.permission === 'default') {
         Notification.requestPermission();
@@ -674,6 +674,54 @@ const db = getFirestore(app);
     doneSwitch.classList.toggle('on', entry.complete);
     doneLabel.textContent = entry.complete ? 'Day complete' : 'Mark day complete';
   });
+
+  async function applyDateRangeHighlight(colorToSet) {
+    const startStr = rangeStartInput.value;
+    const endStr = rangeEndInput.value;
+    if (!startStr || !endStr) return;
+
+    const [sy, sm, sd] = startStr.split('-').map(Number);
+    const [ey, em, ed] = endStr.split('-').map(Number);
+
+    const startDate = new Date(sy, sm - 1, sd);
+    const endDate = new Date(ey, em - 1, ed);
+
+    if (startDate > endDate) {
+      alert('Start date must be before end date.');
+      return;
+    }
+
+    const cur = new Date(startDate);
+    while (cur <= endDate) {
+      const y = cur.getFullYear();
+      const m = cur.getMonth();
+      const d = cur.getDate();
+      const mKey = `${y}-${pad(m + 1)}`;
+      const dNum = pad(d);
+
+      if (!globalCalendar[mKey]) globalCalendar[mKey] = {};
+      if (!globalCalendar[mKey][dNum]) globalCalendar[mKey][dNum] = { events: [], complete: false };
+
+      globalCalendar[mKey][dNum].dayColor = colorToSet;
+      cur.setDate(cur.getDate() + 1);
+    }
+
+    await syncCalendarToCloud();
+    repaintAllVisibleCells();
+    renderSheetContents();
+  }
+
+  if (rangeApplyBtn) {
+    rangeApplyBtn.addEventListener('click', () => {
+      applyDateRangeHighlight(rangeColorInput.value);
+    });
+  }
+
+  if (rangeClearBtn) {
+    rangeClearBtn.addEventListener('click', () => {
+      applyDateRangeHighlight(null);
+    });
+  }
 
   function setSession(username) {
     localStorage.setItem('nocturna:session', JSON.stringify({ username }));
@@ -869,7 +917,6 @@ const db = getFirestore(app);
     });
   }
 
-  // --- Real-time Notification Engine ---
   function getReminderMilliseconds(reminderStr) {
     const match = reminderStr.match(/(\d+)([mhd\w])/);
     if (!match) return 0;
@@ -890,7 +937,6 @@ const db = getFirestore(app);
       icon: 'data:image/svg+xml,<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><circle cx="32" cy="32" r="30" fill="%238b5cf6"/></svg>'
     };
 
-    // ServiceWorker (Mobile/PWA preferred)
     if (swRegistration && swRegistration.showNotification) {
       swRegistration.showNotification(title, options);
     } else if ('Notification' in window && Notification.permission === 'granted') {
@@ -901,7 +947,6 @@ const db = getFirestore(app);
   function checkReminders() {
     const now = new Date();
 
-    // Check ALL events in globalCalendar, not just visible cells
     Object.entries(globalCalendar).forEach(([monthKey, monthData]) => {
       Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
         if (!dayEntry.events) return;
@@ -926,7 +971,6 @@ const db = getFirestore(app);
           const reminderTime = new Date(eventDate.getTime() - reminderMs);
           const diff = now.getTime() - reminderTime.getTime();
 
-          // Trigger if current time is within 3 minutes of scheduled reminder
           if (diff >= 0 && diff < 180000 && now < eventDate) {
             console.log(`🔔 Reminder triggered for: ${event.title} (${event.reminder})`);
             triggeredReminders.add(reminderId);

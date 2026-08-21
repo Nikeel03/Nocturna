@@ -7,8 +7,6 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>Nocturna</title>
-  <link rel="icon" type="image/png" href="icon.png">
-  <link rel="apple-touch-icon" href="icon.png">
   <link rel="manifest" href="manifest.json">
   <link rel="stylesheet" href="style.css">
 </head>
@@ -17,7 +15,18 @@
 <div class="auth-overlay visible" id="auth-overlay">
   <div class="auth-card">
     <div class="auth-brand">
-      <img src="icon.png" alt="Nocturna" class="brand-icon">
+      <div class="owl-mark" aria-hidden="true">
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+          <rect x="12" y="18" width="40" height="26" rx="6" fill="rgba(255,255,255,0.08)"/>
+          <rect x="20" y="14" width="24" height="8" rx="4" fill="#facc15" opacity="0.9"/>
+          <path d="M18 31c2-9 9-15 14-15s12 6 14 15" fill="none" stroke="#f4f2fb" stroke-width="3" stroke-linecap="round"/>
+          <circle cx="24" cy="30" r="4" fill="#f4f2fb"/>
+          <circle cx="40" cy="30" r="4" fill="#f4f2fb"/>
+          <path d="M27 38c2 2 8 2 10 0" fill="none" stroke="#f4f2fb" stroke-width="3" stroke-linecap="round"/>
+          <path d="M18 22l-10 8M46 22l10 8" stroke="#f4f2fb" stroke-width="3" stroke-linecap="round" opacity="0.9"/>
+          <path d="M22 46h20v8H22z" fill="#a78bfa" opacity="0.8"/>
+        </svg>
+      </div>
       <div>
         <h2>Nocturna</h2>
         <p>Private calendar</p>
@@ -152,7 +161,7 @@
       <div class="color-row" id="color-row"></div>
     </div>
     <div class="field">
-      <label for="f-day-color">Day color</label>
+      <label for="f-day-color">Single Day Color</label>
       <input type="color" id="f-day-color" value="#8b5cf6" aria-label="Day color">
     </div>
     <p class="err" id="form-err" style="display:none;">Give the event a name first.</p>
@@ -161,6 +170,30 @@
       <button type="submit" class="btn btn-primary" id="save-btn">Add event</button>
     </div>
   </form>
+
+  <!-- Multi-Day Range Highlight Tool -->
+  <hr class="sheet-divider">
+  <div class="range-block">
+    <h4>Highlight Date Range (Test Week / Holiday)</h4>
+    <div class="row2">
+      <div class="field">
+        <label for="range-start">Start Date</label>
+        <input type="date" id="range-start">
+      </div>
+      <div class="field">
+        <label for="range-end">End Date</label>
+        <input type="date" id="range-end">
+      </div>
+    </div>
+    <div class="field" style="margin-top: 10px;">
+      <label for="range-color">Highlight Color</label>
+      <input type="color" id="range-color" value="#f59e0b">
+    </div>
+    <div class="form-actions" style="margin-top: 10px;">
+      <button type="button" class="btn btn-secondary" id="range-clear-btn">Clear Range</button>
+      <button type="button" class="btn btn-primary" id="range-apply-btn">Apply Highlight</button>
+    </div>
+  </div>
 </div>
 
 <script type="module" src="script.js"></script>

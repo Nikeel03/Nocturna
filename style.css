@@ -878,3 +878,24 @@ form.event-form {
     padding: 18px 16px 16px;
   }
 }
+/* Multi-Day Range Highlight Styles */
+.sheet-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 22px 0 16px;
+}
+
+.range-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-top: 8px;
+}
+
+.range-block h4 {
+  margin: 0 0 12px;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
