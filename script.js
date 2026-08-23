@@ -18,7 +18,7 @@ import {
   onValue 
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
-// 1. Primary Nocturna Firebase (Auth + Firestore)
+// 1. Primary Nocturna Firebase (Auth + Firestore)[cite: 4]
 const nocturnaConfig = {
   apiKey: "AIzaSyAjzmlmjB73S60nUw0vPrEJXq-y3-xlrG0",
   authDomain: "nocturna-f83da.firebaseapp.com",
@@ -33,7 +33,7 @@ const app = initializeApp(nocturnaConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// 2. Secondary Bubweb Firebase Bridge (Realtime Database)
+// 2. Secondary Bubweb Firebase Bridge (Realtime Database)[cite: 12]
 const bubwebConfig = {
   apiKey: "AIzaSyBxkrNYSVqVf2_7wyHl6sA7i6MQ_OY69cg",
   authDomain: "guide-to-the-outside.firebaseapp.com",
@@ -50,7 +50,6 @@ try {
   const bubwebApp = initializeApp(bubwebConfig, "bubwebBridge");
   const bubwebDb = getDatabase(bubwebApp);
   
-  // Realtime listener to Bubweb activities
   const activitiesRef = dbRef(bubwebDb, 'activities');
   onValue(activitiesRef, (snapshot) => {
     const data = snapshot.val();
@@ -165,7 +164,6 @@ try {
     }
   }
 
-  // Merges Nocturna Private Events + Recurring Events + Realtime Bubweb Adventures
   function getDayData(y, m, day) {
     const dKey = dateKey(y, m, day);
     const mKey = dKey.slice(0, 7);
@@ -173,11 +171,11 @@ try {
 
     const baseEntry = (globalCalendar[mKey] && globalCalendar[mKey][dNum]) 
       ? JSON.parse(JSON.stringify(globalCalendar[mKey][dNum])) 
-      : { events: [], complete: false };
+      : { events: [], quests: [], complete: false };
     const directEvents = baseEntry.events || [];
     const recurringEvents = [];
 
-    // 1. Process recurring Nocturna events
+    // Recurring Events Engine
     Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
       const [srcY, srcM] = srcMKey.split('-').map(Number);
 
@@ -219,7 +217,7 @@ try {
       });
     });
 
-    // 2. Process real-time synced Bubweb activities
+    // Bubweb Realtime Synced Activities
     const bubwebEvents = [];
     bubwebActivities.forEach(act => {
       if (act.date === dKey) {
@@ -238,7 +236,8 @@ try {
 
     return {
       ...baseEntry,
-      events: [...directEvents, ...recurringEvents, ...bubwebEvents]
+      events: [...directEvents, ...recurringEvents, ...bubwebEvents],
+      quests: baseEntry.quests || []
     };
   }
 
@@ -451,9 +450,33 @@ try {
     observer.observe(sentinel);
   }
 
+  // Drawer / Sheet Elements
   const backdrop = document.getElementById('backdrop');
   const sheet = document.getElementById('sheet');
   const sheetDate = document.getElementById('sheet-date');
+  const happyCounter = document.getElementById('happy-counter');
+  
+  // Tab Switcher
+  const sheetTabs = document.querySelectorAll('.sheet-tab');
+  const sheetViews = document.querySelectorAll('.sheet-view');
+
+  sheetTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      sheetTabs.forEach(t => t.classList.remove('active'));
+      sheetViews.forEach(v => v.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById(`view-${tab.dataset.tab}`).classList.add('active');
+    });
+  });
+
+  // Quests & Sparks Elements
+  const questList = document.getElementById('quest-list');
+  const emptyQuestHint = document.getElementById('empty-quest-hint');
+  const addQuestForm = document.getElementById('add-quest-form');
+  const questInput = document.getElementById('quest-input');
+  const pasteQuestBtn = document.getElementById('paste-quest-btn');
+
+  // Event Form Elements
   const eventList = document.getElementById('event-list');
   const emptyHint = document.getElementById('empty-hint');
   const form = document.getElementById('event-form');
@@ -471,6 +494,7 @@ try {
   const doneSwitch = document.getElementById('done-switch');
   const doneLabel = document.getElementById('done-label');
 
+  // Multi-day Range Elements
   const rangeStartInput = document.getElementById('range-start');
   const rangeEndInput = document.getElementById('range-end');
   const rangeColorInput = document.getElementById('range-color');
@@ -497,11 +521,159 @@ try {
     });
   }
 
+  function triggerHappySparkBump() {
+    if (!happyCounter) return;
+    happyCounter.classList.remove('bump');
+    void happyCounter.offsetWidth;
+    happyCounter.classList.add('bump');
+  }
+
+  function renderQuests() {
+    if (!questList || !activeDateKey) return;
+    const monthKey = activeDateKey.slice(0, 7);
+    const dayNumber = activeDateKey.slice(-2);
+
+    const dayData = (globalCalendar[monthKey] && globalCalendar[monthKey][dayNumber]) || {};
+    const quests = dayData.quests || [];
+
+    const completedCount = quests.filter(q => q.done).length;
+    if (happyCounter) {
+      happyCounter.textContent = `⚡ ${completedCount} Spark${completedCount === 1 ? '' : 's'}`;
+    }
+
+    questList.innerHTML = '';
+    if (emptyQuestHint) emptyQuestHint.style.display = quests.length ? 'none' : 'block';
+
+    quests.forEach(quest => {
+      const item = document.createElement('div');
+      item.className = `quest-item ${quest.done ? 'completed' : ''}`;
+
+      const checkWrap = document.createElement('label');
+      checkWrap.className = 'quest-check-wrap';
+
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.checked = !!quest.done;
+      checkbox.addEventListener('change', async () => {
+        quest.done = checkbox.checked;
+        if (quest.done) triggerHappySparkBump();
+        await syncCalendarToCloud();
+        renderQuests();
+      });
+
+      const text = document.createElement('span');
+      text.className = 'quest-text';
+      text.textContent = quest.text;
+
+      checkWrap.appendChild(checkbox);
+      checkWrap.appendChild(text);
+      item.appendChild(checkWrap);
+
+      const delBtn = document.createElement('button');
+      delBtn.className = 'quest-del-btn';
+      delBtn.innerHTML = '&times;';
+      delBtn.addEventListener('click', async () => {
+        dayData.quests = dayData.quests.filter(q => q.id !== quest.id);
+        await syncCalendarToCloud();
+        renderQuests();
+      });
+
+      item.appendChild(delBtn);
+      questList.appendChild(item);
+    });
+  }
+
+  if (addQuestForm) {
+    addQuestForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const text = questInput.value.trim();
+      if (!text || !activeDateKey) return;
+
+      const monthKey = activeDateKey.slice(0, 7);
+      const dayNumber = activeDateKey.slice(-2);
+
+      if (!globalCalendar[monthKey]) globalCalendar[monthKey] = {};
+      if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], quests: [], complete: false };
+
+      const dayData = globalCalendar[monthKey][dayNumber];
+      if (!dayData.quests) dayData.quests = [];
+
+      dayData.quests.push({
+        id: 'q_' + Date.now() + Math.random().toString(36).slice(2, 6),
+        text,
+        done: false
+      });
+
+      await syncCalendarToCloud();
+      questInput.value = '';
+      renderQuests();
+    });
+  }
+
+  if (pasteQuestBtn) {
+    pasteQuestBtn.addEventListener('click', async () => {
+      try {
+        const clipText = await navigator.clipboard.readText();
+        if (!clipText || !activeDateKey) return;
+
+        const lines = clipText
+          .split('\n')
+          .map(l => l.replace(/^[-*•\d.)\]\s]+/, '').trim())
+          .filter(l => l.length > 0);
+
+        if (!lines.length) return;
+
+        const monthKey = activeDateKey.slice(0, 7);
+        const dayNumber = activeDateKey.slice(-2);
+
+        if (!globalCalendar[monthKey]) globalCalendar[monthKey] = {};
+        if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], quests: [], complete: false };
+
+        const dayData = globalCalendar[monthKey][dayNumber];
+        if (!dayData.quests) dayData.quests = [];
+
+        lines.forEach(lineText => {
+          dayData.quests.push({
+            id: 'q_' + Date.now() + Math.random().toString(36).slice(2, 6),
+            text: lineText,
+            done: false
+          });
+        });
+
+        await syncCalendarToCloud();
+        renderQuests();
+      } catch (e) {
+        const manual = prompt("Paste task lines below:");
+        if (manual && activeDateKey) {
+          const lines = manual.split('\n').map(l => l.trim()).filter(Boolean);
+          const monthKey = activeDateKey.slice(0, 7);
+          const dayNumber = activeDateKey.slice(-2);
+          const dayData = globalCalendar[monthKey][dayNumber];
+          if (!dayData.quests) dayData.quests = [];
+
+          lines.forEach(lineText => {
+            dayData.quests.push({
+              id: 'q_' + Date.now() + Math.random().toString(36).slice(2, 6),
+              text: lineText,
+              done: false
+            });
+          });
+          await syncCalendarToCloud();
+          renderQuests();
+        }
+      }
+    });
+  }
+
   async function openSheet(y, m, day) {
     activeDateKey = dateKey(y, m, day);
     resetForm();
     const dObj = new Date(y, m, day);
     sheetDate.textContent = dObj.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
+
+    // Reset to first tab (Quests) by default for minimalist clarity
+    sheetTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === 'quests'));
+    sheetViews.forEach(v => v.classList.toggle('active', v.id === 'view-quests'));
 
     if (rangeStartInput && rangeEndInput) {
       rangeStartInput.value = activeDateKey;
@@ -518,7 +690,6 @@ try {
     backdrop.classList.remove('open');
     sheet.classList.remove('open');
     sheet.style.transform = '';
-    sheet.style.transition = '';
     resetForm();
   }
 
@@ -537,6 +708,8 @@ try {
     doneSwitch.classList.toggle('on', isOver);
     doneLabel.textContent = pastAuto ? 'This day has passed' : (dayData.complete ? 'Day complete' : 'Mark day complete');
     dayColorPicker.value = dayData.dayColor || '#8b5cf6';
+
+    renderQuests();
 
     eventList.innerHTML = '';
     const events = dayData.events || [];
@@ -579,7 +752,6 @@ try {
       const actions = document.createElement('div');
       actions.className = 'event-actions';
 
-      // Read-only actions for synced Bubweb items
       if (ev.isBubwebSynced) {
         const badge = document.createElement('span');
         badge.style.fontSize = '11px';
@@ -591,7 +763,11 @@ try {
         const editBtn = document.createElement('div');
         editBtn.className = 'icon-btn';
         editBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>';
-        editBtn.addEventListener('click', () => startEdit(ev));
+        editBtn.addEventListener('click', () => {
+          sheetTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === 'events'));
+          sheetViews.forEach(v => v.classList.toggle('active', v.id === 'view-events'));
+          startEdit(ev);
+        });
         actions.appendChild(editBtn);
 
         const delBtn = document.createElement('div');
@@ -625,7 +801,7 @@ try {
     formErr.style.display = 'none';
     setSelectedColor('violet');
     dayColorPicker.value = '#8b5cf6';
-    saveBtn.textContent = 'Add event';
+    saveBtn.textContent = 'Add Event';
     cancelEditBtn.style.display = 'none';
   }
 
@@ -639,7 +815,7 @@ try {
     repeatInput.value = ev.repeat || 'none';
     reminderInput.value = ev.reminder || 'none';
     setSelectedColor(ev.color || 'violet');
-    saveBtn.textContent = 'Update event';
+    saveBtn.textContent = 'Update Event';
     cancelEditBtn.style.display = 'block';
     titleInput.focus();
   }
@@ -680,7 +856,7 @@ try {
     const dayNumber = saveTargetDate.slice(-2);
 
     if (!globalCalendar[monthKey]) globalCalendar[monthKey] = {};
-    if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], complete: false };
+    if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], quests: [], complete: false };
 
     const entry = globalCalendar[monthKey][dayNumber];
     if (dayColorPicker.value) entry.dayColor = dayColorPicker.value;
@@ -727,7 +903,7 @@ try {
     const dayNumber = activeDateKey.slice(-2);
 
     if (!globalCalendar[monthKey]) globalCalendar[monthKey] = {};
-    if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], complete: false };
+    if (!globalCalendar[monthKey][dayNumber]) globalCalendar[monthKey][dayNumber] = { events: [], quests: [], complete: false };
 
     const entry = globalCalendar[monthKey][dayNumber];
     entry.complete = !entry.complete;
@@ -763,7 +939,7 @@ try {
       const dNum = pad(d);
 
       if (!globalCalendar[mKey]) globalCalendar[mKey] = {};
-      if (!globalCalendar[mKey][dNum]) globalCalendar[mKey][dNum] = { events: [], complete: false };
+      if (!globalCalendar[mKey][dNum]) globalCalendar[mKey][dNum] = { events: [], quests: [], complete: false };
 
       globalCalendar[mKey][dNum].dayColor = colorToSet;
       cur.setDate(cur.getDate() + 1);

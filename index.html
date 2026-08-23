@@ -102,96 +102,134 @@
 <div class="backdrop" id="backdrop"></div>
 <div class="sheet" id="sheet">
   <div class="sheet-handle"></div>
+  
   <div class="sheet-head">
-    <h3 id="sheet-date">Day</h3>
+    <div>
+      <h3 id="sheet-date">Day</h3>
+      <span class="happy-pill" id="happy-counter">⚡ 0 Sparks</span>
+    </div>
     <button class="sheet-close" id="sheet-close" aria-label="Close">&times;</button>
   </div>
 
-  <div class="done-toggle">
-    <span id="done-label">Mark day complete</span>
-    <div class="switch" id="done-switch"><div class="knob"></div></div>
+  <!-- Minimalist Clean Tab Switcher -->
+  <div class="sheet-nav">
+    <button type="button" class="sheet-tab active" data-tab="quests">Quests</button>
+    <button type="button" class="sheet-tab" data-tab="events">Events</button>
+    <button type="button" class="sheet-tab" data-tab="tools">Tools</button>
   </div>
 
-  <div class="event-list" id="event-list"></div>
-  <p class="empty-hint" id="empty-hint" style="display:none;">No events yet — add one below.</p>
+  <!-- Tab 1: Quests & Sparks -->
+  <div class="sheet-view active" id="view-quests">
+    <div class="view-actions">
+      <span class="sub-label">Checklist</span>
+      <button type="button" class="btn-micro" id="paste-quest-btn">📋 Smart Paste</button>
+    </div>
+    
+    <div class="quest-list" id="quest-list"></div>
+    <p class="empty-hint" id="empty-quest-hint" style="display:none;">No quests yet — add or paste items below.</p>
 
-  <form class="event-form" id="event-form">
-    <div class="field">
-      <label for="f-title">Event</label>
-      <input type="text" id="f-title" placeholder="What's happening?" maxlength="60">
-    </div>
-    <div class="row2">
-      <div class="field">
-        <label for="f-time">Time</label>
-        <input type="time" id="f-time">
-      </div>
-      <div class="field">
-        <label for="f-location">Location</label>
-        <input type="text" id="f-location" placeholder="Optional" maxlength="60">
-      </div>
-    </div>
-    <div class="field toggle-row">
-      <label for="f-all-day">All day</label>
-      <div class="toggle-wrap">
-        <input type="checkbox" id="f-all-day">
-      </div>
-    </div>
-    <div class="field">
-      <label for="f-repeat">Repeat</label>
-      <select id="f-repeat">
-        <option value="none">Does not repeat</option>
-        <option value="daily">Daily</option>
-        <option value="weekly">Weekly</option>
-        <option value="monthly">Monthly</option>
-        <option value="yearly">Yearly / Birthday</option>
-      </select>
-    </div>
-    <div class="field">
-      <label for="f-reminder">Reminder</label>
-      <select id="f-reminder">
-        <option value="none">No reminder</option>
-        <option value="15m">15 minutes before</option>
-        <option value="1h">1 hour before</option>
-        <option value="1d">1 day before</option>
-        <option value="1w">1 week before</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>Event color</label>
-      <div class="color-row" id="color-row"></div>
-    </div>
-    <div class="field">
-      <label for="f-day-color">Single Day Color</label>
-      <input type="color" id="f-day-color" value="#8b5cf6" aria-label="Day color">
-    </div>
-    <p class="err" id="form-err" style="display:none;">Give the event a name first.</p>
-    <div class="form-actions">
-      <button type="button" class="btn btn-secondary" id="cancel-edit" style="display:none;">Cancel</button>
-      <button type="submit" class="btn btn-primary" id="save-btn">Add event</button>
-    </div>
-  </form>
+    <form id="add-quest-form" class="quest-inline-form">
+      <input type="text" id="quest-input" placeholder="Add a quest or drop a task…" maxlength="120">
+      <button type="submit" class="btn-mini-add">+</button>
+    </form>
+  </div>
 
-  <!-- Multi-Day Range Highlight Tool -->
-  <hr class="sheet-divider">
-  <div class="range-block">
-    <h4>Highlight Date Range (Test Week / Holiday)</h4>
-    <div class="row2">
+  <!-- Tab 2: Events & Schedule -->
+  <div class="sheet-view" id="view-events">
+    <div class="event-list" id="event-list"></div>
+    <p class="empty-hint" id="empty-hint" style="display:none;">No events scheduled for this date.</p>
+
+    <div class="mini-card">
+      <form class="event-form" id="event-form">
+        <div class="field">
+          <label for="f-title">Event</label>
+          <input type="text" id="f-title" placeholder="What's happening?" maxlength="60">
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="f-time">Time</label>
+            <input type="time" id="f-time">
+          </div>
+          <div class="field">
+            <label for="f-location">Location</label>
+            <input type="text" id="f-location" placeholder="Optional" maxlength="60">
+          </div>
+        </div>
+        <div class="field toggle-row">
+          <label for="f-all-day">All day</label>
+          <div class="toggle-wrap">
+            <input type="checkbox" id="f-all-day">
+          </div>
+        </div>
+        <div class="row2">
+          <div class="field">
+            <label for="f-repeat">Repeat</label>
+            <select id="f-repeat">
+              <option value="none">Does not repeat</option>
+              <option value="daily">Daily</option>
+              <option value="weekly">Weekly</option>
+              <option value="monthly">Monthly</option>
+              <option value="yearly">Yearly / Birthday</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="f-reminder">Reminder</label>
+            <select id="f-reminder">
+              <option value="none">No reminder</option>
+              <option value="15m">15 min before</option>
+              <option value="1h">1 hour before</option>
+              <option value="1d">1 day before</option>
+              <option value="1w">1 week before</option>
+            </select>
+          </div>
+        </div>
+        <div class="field">
+          <label>Event Color</label>
+          <div class="color-row" id="color-row"></div>
+        </div>
+        <p class="err" id="form-err" style="display:none;">Give the event a name first.</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" id="cancel-edit" style="display:none;">Cancel</button>
+          <button type="submit" class="btn btn-primary" id="save-btn">Add Event</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Tab 3: Tools & Highlights -->
+  <div class="sheet-view" id="view-tools">
+    <div class="done-toggle">
+      <span id="done-label">Mark day complete</span>
+      <div class="switch" id="done-switch"><div class="knob"></div></div>
+    </div>
+
+    <div class="mini-card">
       <div class="field">
-        <label for="range-start">Start Date</label>
-        <input type="date" id="range-start">
-      </div>
-      <div class="field">
-        <label for="range-end">End Date</label>
-        <input type="date" id="range-end">
+        <label for="f-day-color">Single Day Highlight</label>
+        <input type="color" id="f-day-color" value="#8b5cf6">
       </div>
     </div>
-    <div class="field" style="margin-top: 10px;">
-      <label for="range-color">Highlight Color</label>
-      <input type="color" id="range-color" value="#f59e0b">
-    </div>
-    <div class="form-actions" style="margin-top: 10px;">
-      <button type="button" class="btn btn-secondary" id="range-clear-btn">Clear Range</button>
-      <button type="button" class="btn btn-primary" id="range-apply-btn">Apply Highlight</button>
+
+    <div class="mini-card" style="margin-top: 12px;">
+      <h4 class="card-subtitle">Multi-Day Range Highlight (Test / Holiday)</h4>
+      <div class="row2">
+        <div class="field">
+          <label for="range-start">Start Date</label>
+          <input type="date" id="range-start">
+        </div>
+        <div class="field">
+          <label for="range-end">End Date</label>
+          <input type="date" id="range-end">
+        </div>
+      </div>
+      <div class="field" style="margin-top: 8px;">
+        <label for="range-color">Highlight Color</label>
+        <input type="color" id="range-color" value="#f59e0b">
+      </div>
+      <div class="form-actions" style="margin-top: 10px;">
+        <button type="button" class="btn btn-secondary" id="range-clear-btn">Clear Range</button>
+        <button type="button" class="btn btn-primary" id="range-apply-btn">Apply Highlight</button>
+      </div>
     </div>
   </div>
 </div>
