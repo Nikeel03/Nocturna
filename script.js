@@ -18,7 +18,7 @@ import {
   onValue 
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
-// 1. Primary Nocturna Firebase (Auth + Firestore)[cite: 4]
+// 1. Primary Nocturna Firebase (Auth + Firestore)
 const nocturnaConfig = {
   apiKey: "AIzaSyAjzmlmjB73S60nUw0vPrEJXq-y3-xlrG0",
   authDomain: "nocturna-f83da.firebaseapp.com",
@@ -33,7 +33,7 @@ const app = initializeApp(nocturnaConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// 2. Secondary Bubweb Firebase Bridge[cite: 12]
+// 2. Secondary Bubweb Firebase Bridge
 const bubwebConfig = {
   apiKey: "AIzaSyBxkrNYSVqVf2_7wyHl6sA7i6MQ_OY69cg",
   authDomain: "guide-to-the-outside.firebaseapp.com",
@@ -91,7 +91,18 @@ function getNthWeekdayOfMonth(year, month, weekday, n) {
   return 1;
 }
 
-// Hindu Lunisolar Panchang Calendar (Precise Astronomical Lookup + Metonic Fallback)
+// Fixed: Added missing 1st Wednesday of the month function
+function getFirstWednesdayOfMonth(year, month) {
+  for (let d = 1; d <= 7; d++) {
+    const testDate = new Date(year, month, d);
+    if (testDate.getDay() === 3) { // 3 = Wednesday
+      return d;
+    }
+  }
+  return 1;
+}
+
+// Hindu Lunisolar Panchang Calendar (Lookup + Metonic Fallback)
 const HINDU_FESTIVALS_TABLE = {
   2024: { diwali: '10-31', shivaratri: '03-08', janmashtami: '08-26', kavady: '01-25' },
   2025: { diwali: '10-20', shivaratri: '02-26', janmashtami: '08-16', kavady: '02-10' },
@@ -111,7 +122,6 @@ function getHinduFestivalsForYear(year) {
   if (HINDU_FESTIVALS_TABLE[year]) {
     return HINDU_FESTIVALS_TABLE[year];
   }
-  // 19-year Metonic cyclical recurrence formula for years beyond 2035
   const baseYear = 2024 + ((year - 2024) % 19);
   return HINDU_FESTIVALS_TABLE[baseYear] || HINDU_FESTIVALS_TABLE[2026];
 }
@@ -124,7 +134,6 @@ function getSouthAfricanHolidaysForYear(year) {
     const dateObj = new Date(year, m - 1, d);
     holidays[dStr] = { name, color, isOff, note, dayColor: color, isHindu };
 
-    // South Africa Public Holidays Act: If a paid public holiday lands on Sunday, Monday is a paid public holiday
     if (isOff && dateObj.getDay() === 0) {
       const monDate = new Date(year, m - 1, d + 1);
       const monKey = `${monDate.getFullYear()}-${String(monDate.getMonth() + 1).padStart(2, '0')}-${String(monDate.getDate()).padStart(2, '0')}`;
@@ -139,7 +148,7 @@ function getSouthAfricanHolidaysForYear(year) {
     }
   }
 
-  // 1. Statutory National Public Holidays (Paid Time Off)
+  // 1. Statutory National Public Holidays
   addHoliday(1, 1, "New Year's Day", "#ef4444", true);
   addHoliday(3, 21, "Human Rights Day", "#e11d48", true);
   addHoliday(4, 27, "Freedom Day", "#f59e0b", true);
@@ -151,7 +160,7 @@ function getSouthAfricanHolidaysForYear(year) {
   addHoliday(12, 25, "Christmas Day", "#ef4444", true);
   addHoliday(12, 26, "Day of Goodwill", "#ef4444", true);
 
-  // 2. Computed Christian Easter Holidays (Paid Time Off)
+  // 2. Computed Easter Holidays
   const easterSunday = calculateEasterSunday(year);
   const goodFriday = new Date(easterSunday);
   goodFriday.setDate(easterSunday.getDate() - 2);
@@ -161,7 +170,7 @@ function getSouthAfricanHolidaysForYear(year) {
   addHoliday(goodFriday.getMonth() + 1, goodFriday.getDate(), "Good Friday", "#6366f1", true);
   addHoliday(familyDay.getMonth() + 1, familyDay.getDate(), "Family Day", "#6366f1", true);
 
-  // 3. Hindu Sacred Calendar & Major Festivals
+  // 3. Hindu Sacred Festivals
   const hinduData = getHinduFestivalsForYear(year);
 
   if (hinduData.diwali) {
@@ -187,6 +196,23 @@ function getSouthAfricanHolidaysForYear(year) {
   addHoliday(5, mothersDay, "Mother's Day", "#a855f7", false, "Special Sunday");
   addHoliday(6, fathersDay, "Father's Day", "#3b82f6", false, "Special Sunday");
   addHoliday(12, 31, "New Year's Eve", "#facc15", false, "Celebration");
+
+  // 5. Fuel Price Change Day (1st Wednesday of every month)
+  for (let m = 1; m <= 12; m++) {
+    const firstWedDay = getFirstWednesdayOfMonth(year, m - 1);
+    const dStr = `${year}-${String(m).padStart(2, '0')}-${String(firstWedDay).padStart(2, '0')}`;
+    
+    if (!holidays[dStr]) {
+      holidays[dStr] = {
+        name: "Fuel Price Adjustment",
+        color: "#f59e0b",
+        isOff: false,
+        note: "Official DMPR / CEF Fuel Price Adjustment Day",
+        dayColor: null,
+        isFuel: true
+      };
+    }
+  } 
 
   return holidays;
 }
@@ -357,7 +383,7 @@ function getSouthAfricanHolidaysForYear(year) {
       });
     });
 
-    // Realtime Bubweb Activities[cite: 12]
+    // Realtime Bubweb Activities
     const bubwebEvents = [];
     bubwebActivities.forEach(act => {
       if (act.date === dKey) {
@@ -521,6 +547,12 @@ function getSouthAfricanHolidaysForYear(year) {
 
     const [ky, km, kd] = dKey.split('-').map(Number);
     const day = kd;
+    const dateObj = new Date(ky, km - 1, kd);
+    const dayOfWeek = dateObj.getDay();
+
+    const isWeekend = (dayOfWeek === 0 || dayOfWeek === 6);
+    cell.classList.toggle('weekend', isWeekend);
+
     const over = !!(entry && entry.complete) || isDayPast(ky, km - 1, kd);
     cell.classList.toggle('done', over);
     cell.innerHTML = '';
@@ -531,12 +563,15 @@ function getSouthAfricanHolidaysForYear(year) {
     const shouldHide = !!query && visibleEvents.length === 0;
     cell.style.display = shouldHide ? 'none' : '';
 
-    const dayColor = entry && entry.dayColor ? entry.dayColor : null;
-    cell.style.background = dayColor ? withAlpha(dayColor, 0.22) : 'var(--surface)';
-    cell.style.borderColor = dayColor || 'var(--border)';
-    cell.style.boxShadow = dayColor ? 'inset 0 0 0 1px ' + withAlpha(dayColor, 0.35) : 'none';
+    const hasPublicOff = events.some(ev => ev.isOff);
+    const isLongWeekend = hasPublicOff && (dayOfWeek === 1 || dayOfWeek === 5);
+    cell.classList.toggle('long-weekend-part', isLongWeekend);
 
-    // Day Header
+    const dayColor = entry && entry.dayColor ? entry.dayColor : null;
+    cell.style.background = dayColor ? withAlpha(dayColor, 0.22) : (isWeekend ? 'rgba(37, 29, 56, 0.7)' : 'var(--surface)');
+    cell.style.borderColor = dayColor || (isWeekend ? 'rgba(167, 139, 250, 0.28)' : 'var(--border)');
+    cell.style.boxShadow = dayColor ? 'inset 0 0 0 1px ' + withAlpha(dayColor, 0.35) : (isLongWeekend ? '0 0 0 1.5px rgba(245, 158, 11, 0.5) inset' : 'none');
+
     const headRow = document.createElement('div');
     headRow.style.display = 'flex';
     headRow.style.justifyContent = 'space-between';
@@ -547,8 +582,8 @@ function getSouthAfricanHolidaysForYear(year) {
     num.textContent = day;
     headRow.appendChild(num);
 
-    const hasPublicOff = events.some(ev => ev.isOff);
     const hasHinduFest = events.some(ev => ev.isHindu);
+    const fuelEvent = events.find(ev => ev.isFuel);
 
     if (hasPublicOff) {
       const offTag = document.createElement('span');
@@ -558,7 +593,7 @@ function getSouthAfricanHolidaysForYear(year) {
       offTag.style.background = 'rgba(239, 68, 68, 0.18)';
       offTag.style.padding = '1px 4px';
       offTag.style.borderRadius = '4px';
-      offTag.textContent = 'OFF';
+      offTag.textContent = isLongWeekend ? '🏖️ LONG WKND' : 'OFF';
       headRow.appendChild(offTag);
     } else if (hasHinduFest) {
       const festTag = document.createElement('span');
@@ -570,6 +605,16 @@ function getSouthAfricanHolidaysForYear(year) {
       festTag.style.borderRadius = '4px';
       festTag.textContent = '🪔';
       headRow.appendChild(festTag);
+    } else if (fuelEvent) {
+      const fuelTag = document.createElement('span');
+      fuelTag.style.fontSize = '9px';
+      fuelTag.style.fontWeight = '800';
+      fuelTag.style.color = '#f59e0b';
+      fuelTag.style.background = 'rgba(245, 158, 11, 0.18)';
+      fuelTag.style.padding = '1px 4px';
+      fuelTag.style.borderRadius = '4px';
+      fuelTag.textContent = '⛽ FUEL';
+      headRow.appendChild(fuelTag);
     }
 
     cell.appendChild(headRow);
@@ -657,7 +702,6 @@ function getSouthAfricanHolidaysForYear(year) {
   const sheetDate = document.getElementById('sheet-date');
   const happyCounter = document.getElementById('happy-counter');
   
-  // Tab Switcher
   const sheetTabs = document.querySelectorAll('.sheet-tab');
   const sheetViews = document.querySelectorAll('.sheet-view');
 
@@ -670,14 +714,12 @@ function getSouthAfricanHolidaysForYear(year) {
     });
   });
 
-  // Quests & Sparks Elements
   const questList = document.getElementById('quest-list');
   const emptyQuestHint = document.getElementById('empty-quest-hint');
   const addQuestForm = document.getElementById('add-quest-form');
   const questInput = document.getElementById('quest-input');
   const pasteQuestBtn = document.getElementById('paste-quest-btn');
 
-  // Event Form Elements
   const eventList = document.getElementById('event-list');
   const emptyHint = document.getElementById('empty-hint');
   const form = document.getElementById('event-form');
@@ -695,7 +737,6 @@ function getSouthAfricanHolidaysForYear(year) {
   const doneSwitch = document.getElementById('done-switch');
   const doneLabel = document.getElementById('done-label');
 
-  // Multi-day Range Elements
   const rangeStartInput = document.getElementById('range-start');
   const rangeEndInput = document.getElementById('range-end');
   const rangeColorInput = document.getElementById('range-color');

@@ -967,3 +967,18 @@ form.event-form {
   box-shadow: 0 16px 30px rgba(139, 92, 246, 0.35);
   cursor: pointer;
 }
+
+/* Weekend Outlines & Distinct Styling */
+.cell.weekend {
+  border-color: rgba(167, 139, 250, 0.28); /* Soft lavender-purple outline */
+  background: rgba(37, 29, 56, 0.7);
+}
+
+.cell.weekend .daynum {
+  color: #c084fc; /* Tint weekend numbers distinctly */
+}
+
+/* Long Weekend Highlight Ring */
+.cell.long-weekend-part {
+  box-shadow: 0 0 0 1.5px rgba(245, 158, 11, 0.45) inset;
+}
