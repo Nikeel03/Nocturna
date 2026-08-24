@@ -33,7 +33,7 @@ const app = initializeApp(nocturnaConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
-// 2. Secondary Bubweb Firebase Bridge (Realtime Database)[cite: 12]
+// 2. Secondary Bubweb Firebase Bridge[cite: 12]
 const bubwebConfig = {
   apiKey: "AIzaSyBxkrNYSVqVf2_7wyHl6sA7i6MQ_OY69cg",
   authDomain: "guide-to-the-outside.firebaseapp.com",
@@ -49,7 +49,6 @@ let bubwebActivities = [];
 try {
   const bubwebApp = initializeApp(bubwebConfig, "bubwebBridge");
   const bubwebDb = getDatabase(bubwebApp);
-  
   const activitiesRef = dbRef(bubwebDb, 'activities');
   onValue(activitiesRef, (snapshot) => {
     const data = snapshot.val();
@@ -58,6 +57,138 @@ try {
   });
 } catch (e) {
   console.warn("Bubweb bridge init warning:", e);
+}
+
+// --- Future-Proofed Astronomical Calculations ---
+function calculateEasterSunday(year) {
+  const a = year % 19;
+  const b = Math.floor(year / 100);
+  const c = year % 100;
+  const d = Math.floor(b / 4);
+  const e = b % 4;
+  const f = Math.floor((b + 8) / 25);
+  const g = Math.floor((b - f + 1) / 3);
+  const h = (19 * a + b - d - g + 15) % 30;
+  const i = Math.floor(c / 4);
+  const k = c % 4;
+  const l = (32 + 2 * e + 2 * i - h - k) % 7;
+  const m = Math.floor((a + 11 * h + 22 * l) / 451);
+  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
+  const day = ((h + l - 7 * m + 114) % 31) + 1;
+  return new Date(year, month, day);
+}
+
+function getNthWeekdayOfMonth(year, month, weekday, n) {
+  let count = 0;
+  for (let d = 1; d <= 31; d++) {
+    const testDate = new Date(year, month, d);
+    if (testDate.getMonth() !== month) break;
+    if (testDate.getDay() === weekday) {
+      count++;
+      if (count === n) return d;
+    }
+  }
+  return 1;
+}
+
+// Hindu Lunisolar Panchang Calendar (Precise Astronomical Lookup + Metonic Fallback)
+const HINDU_FESTIVALS_TABLE = {
+  2024: { diwali: '10-31', shivaratri: '03-08', janmashtami: '08-26', kavady: '01-25' },
+  2025: { diwali: '10-20', shivaratri: '02-26', janmashtami: '08-16', kavady: '02-10' },
+  2026: { diwali: '11-08', shivaratri: '02-15', janmashtami: '09-04', kavady: '02-01' },
+  2027: { diwali: '10-28', shivaratri: '03-06', janmashtami: '08-25', kavady: '01-22' },
+  2028: { diwali: '10-17', shivaratri: '02-23', janmashtami: '08-13', kavady: '02-09' },
+  2029: { diwali: '11-05', shivaratri: '02-11', janmashtami: '08-31', kavady: '01-29' },
+  2030: { diwali: '10-26', shivaratri: '03-02', janmashtami: '08-21', kavady: '01-18' },
+  2031: { diwali: '11-14', shivaratri: '02-20', janmashtami: '08-10', kavady: '02-06' },
+  2032: { diwali: '11-02', shivaratri: '03-09', janmashtami: '08-28', kavady: '01-26' },
+  2033: { diwali: '10-22', shivaratri: '02-27', janmashtami: '08-17', kavady: '02-14' },
+  2034: { diwali: '11-10', shivaratri: '02-17', janmashtami: '09-05', kavady: '02-03' },
+  2035: { diwali: '10-30', shivaratri: '03-07', janmashtami: '08-26', kavady: '01-24' }
+};
+
+function getHinduFestivalsForYear(year) {
+  if (HINDU_FESTIVALS_TABLE[year]) {
+    return HINDU_FESTIVALS_TABLE[year];
+  }
+  // 19-year Metonic cyclical recurrence formula for years beyond 2035
+  const baseYear = 2024 + ((year - 2024) % 19);
+  return HINDU_FESTIVALS_TABLE[baseYear] || HINDU_FESTIVALS_TABLE[2026];
+}
+
+function getSouthAfricanHolidaysForYear(year) {
+  const holidays = {};
+
+  function addHoliday(m, d, name, color, isOff = true, note = '', isHindu = false) {
+    const dStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    const dateObj = new Date(year, m - 1, d);
+    holidays[dStr] = { name, color, isOff, note, dayColor: color, isHindu };
+
+    // South Africa Public Holidays Act: If a paid public holiday lands on Sunday, Monday is a paid public holiday
+    if (isOff && dateObj.getDay() === 0) {
+      const monDate = new Date(year, m - 1, d + 1);
+      const monKey = `${monDate.getFullYear()}-${String(monDate.getMonth() + 1).padStart(2, '0')}-${String(monDate.getDate()).padStart(2, '0')}`;
+      holidays[monKey] = {
+        name: `${name} (Observed)`,
+        color,
+        isOff: true,
+        note: 'Public Holiday (Sunday Roll-over)',
+        dayColor: color,
+        isHindu: false
+      };
+    }
+  }
+
+  // 1. Statutory National Public Holidays (Paid Time Off)
+  addHoliday(1, 1, "New Year's Day", "#ef4444", true);
+  addHoliday(3, 21, "Human Rights Day", "#e11d48", true);
+  addHoliday(4, 27, "Freedom Day", "#f59e0b", true);
+  addHoliday(5, 1, "Workers' Day", "#e11d48", true);
+  addHoliday(6, 16, "Youth Day", "#0284c7", true);
+  addHoliday(8, 9, "National Women's Day", "#ec4899", true);
+  addHoliday(9, 24, "Heritage Day", "#10b981", true);
+  addHoliday(12, 16, "Day of Reconciliation", "#10b981", true);
+  addHoliday(12, 25, "Christmas Day", "#ef4444", true);
+  addHoliday(12, 26, "Day of Goodwill", "#ef4444", true);
+
+  // 2. Computed Christian Easter Holidays (Paid Time Off)
+  const easterSunday = calculateEasterSunday(year);
+  const goodFriday = new Date(easterSunday);
+  goodFriday.setDate(easterSunday.getDate() - 2);
+  const familyDay = new Date(easterSunday);
+  familyDay.setDate(easterSunday.getDate() + 1);
+
+  addHoliday(goodFriday.getMonth() + 1, goodFriday.getDate(), "Good Friday", "#6366f1", true);
+  addHoliday(familyDay.getMonth() + 1, familyDay.getDate(), "Family Day", "#6366f1", true);
+
+  // 3. Hindu Sacred Calendar & Major Festivals
+  const hinduData = getHinduFestivalsForYear(year);
+
+  if (hinduData.diwali) {
+    const [dm, dd] = hinduData.diwali.split('-').map(Number);
+    addHoliday(dm, dd, "Diwali (Deepavali)", "#f97316", false, "Festival of Lights", true);
+  }
+  if (hinduData.shivaratri) {
+    const [sm, sd] = hinduData.shivaratri.split('-').map(Number);
+    addHoliday(sm, sd, "Maha Shivaratri", "#8b5cf6", false, "Great Night of Shiva", true);
+  }
+  if (hinduData.janmashtami) {
+    const [jm, jd] = hinduData.janmashtami.split('-').map(Number);
+    addHoliday(jm, jd, "Krishna Janmashtami", "#06b6d4", false, "Birth of Lord Krishna", true);
+  }
+  if (hinduData.kavady) {
+    const [km, kd] = hinduData.kavady.split('-').map(Number);
+    addHoliday(km, kd, "Thaipoosam Kavady", "#eab308", false, "Murugan Devotion & Penance", true);
+  }
+
+  // 4. Cultural Observances
+  const mothersDay = getNthWeekdayOfMonth(year, 4, 0, 2);
+  const fathersDay = getNthWeekdayOfMonth(year, 5, 0, 3);
+  addHoliday(5, mothersDay, "Mother's Day", "#a855f7", false, "Special Sunday");
+  addHoliday(6, fathersDay, "Father's Day", "#3b82f6", false, "Special Sunday");
+  addHoliday(12, 31, "New Year's Eve", "#facc15", false, "Celebration");
+
+  return holidays;
 }
 
 (function () {
@@ -107,6 +238,7 @@ try {
   let isLoading = false;
   let triggeredReminders = new Set();
   let swRegistration = null;
+  let holidayCacheByYear = {};
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function monthKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
@@ -164,6 +296,14 @@ try {
     }
   }
 
+  function getSAHoliday(y, m, day) {
+    if (!holidayCacheByYear[y]) {
+      holidayCacheByYear[y] = getSouthAfricanHolidaysForYear(y);
+    }
+    const dKey = dateKey(y, m, day);
+    return holidayCacheByYear[y][dKey] || null;
+  }
+
   function getDayData(y, m, day) {
     const dKey = dateKey(y, m, day);
     const mKey = dKey.slice(0, 7);
@@ -175,7 +315,7 @@ try {
     const directEvents = baseEntry.events || [];
     const recurringEvents = [];
 
-    // Recurring Events Engine
+    // Recurring Events
     Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
       const [srcY, srcM] = srcMKey.split('-').map(Number);
 
@@ -217,7 +357,7 @@ try {
       });
     });
 
-    // Bubweb Realtime Synced Activities
+    // Realtime Bubweb Activities[cite: 12]
     const bubwebEvents = [];
     bubwebActivities.forEach(act => {
       if (act.date === dKey) {
@@ -234,9 +374,29 @@ try {
       }
     });
 
+    // Dynamic South African Public Holiday & Hindu Observance Injection
+    const saHoliday = getSAHoliday(y, m, day);
+    const holidayEvents = [];
+    if (saHoliday) {
+      const icon = saHoliday.isOff ? '🇿🇦 ' : (saHoliday.isHindu ? '🪔 ' : '✨ ');
+      holidayEvents.push({
+        id: `sa-holiday-${dKey}`,
+        title: `${icon}${saHoliday.name}`,
+        allDay: true,
+        location: saHoliday.note || (saHoliday.isOff ? 'Public Holiday (Paid Off)' : 'Observance'),
+        color: saHoliday.color,
+        isHoliday: true,
+        isOff: saHoliday.isOff,
+        isHindu: !!saHoliday.isHindu
+      });
+    }
+
+    const effectiveDayColor = baseEntry.dayColor || (saHoliday ? saHoliday.dayColor : null);
+
     return {
       ...baseEntry,
-      events: [...directEvents, ...recurringEvents, ...bubwebEvents],
+      dayColor: effectiveDayColor,
+      events: [...holidayEvents, ...directEvents, ...recurringEvents, ...bubwebEvents],
       quests: baseEntry.quests || []
     };
   }
@@ -254,9 +414,11 @@ try {
   }
 
   function withAlpha(hex, alpha) {
+    if (!hex) return 'transparent';
     const clean = hex.replace('#', '');
     const full = clean.length === 3 ? clean.split('').map(ch => ch + ch).join('') : clean;
     const int = parseInt(full, 16);
+    if (isNaN(int)) return 'transparent';
     const r = (int >> 16) & 255;
     const g = (int >> 8) & 255;
     const b = int & 255;
@@ -374,19 +536,58 @@ try {
     cell.style.borderColor = dayColor || 'var(--border)';
     cell.style.boxShadow = dayColor ? 'inset 0 0 0 1px ' + withAlpha(dayColor, 0.35) : 'none';
 
+    // Day Header
+    const headRow = document.createElement('div');
+    headRow.style.display = 'flex';
+    headRow.style.justifyContent = 'space-between';
+    headRow.style.alignItems = 'center';
+
     const num = document.createElement('div');
     num.className = 'daynum';
     num.textContent = day;
-    cell.appendChild(num);
+    headRow.appendChild(num);
+
+    const hasPublicOff = events.some(ev => ev.isOff);
+    const hasHinduFest = events.some(ev => ev.isHindu);
+
+    if (hasPublicOff) {
+      const offTag = document.createElement('span');
+      offTag.style.fontSize = '9px';
+      offTag.style.fontWeight = '800';
+      offTag.style.color = '#ef4444';
+      offTag.style.background = 'rgba(239, 68, 68, 0.18)';
+      offTag.style.padding = '1px 4px';
+      offTag.style.borderRadius = '4px';
+      offTag.textContent = 'OFF';
+      headRow.appendChild(offTag);
+    } else if (hasHinduFest) {
+      const festTag = document.createElement('span');
+      festTag.style.fontSize = '9px';
+      festTag.style.fontWeight = '800';
+      festTag.style.color = '#f97316';
+      festTag.style.background = 'rgba(249, 115, 22, 0.18)';
+      festTag.style.padding = '1px 4px';
+      festTag.style.borderRadius = '4px';
+      festTag.textContent = '🪔';
+      headRow.appendChild(festTag);
+    }
+
+    cell.appendChild(headRow);
 
     const chips = document.createElement('div');
     chips.className = 'chips';
     visibleEvents.slice(0, 3).forEach(ev => {
       const chip = document.createElement('div');
       chip.className = 'chip';
-      const colorObj = COLORS.find(c => c.id === ev.color) || COLORS[0];
-      chip.style.background = colorObj.hex;
-      const meta = ev.allDay ? 'All day' : (ev.time ? ev.time : '');
+      
+      let hexColor = ev.color;
+      if (!hexColor.startsWith('#')) {
+        const cObj = COLORS.find(c => c.id === ev.color);
+        hexColor = cObj ? cObj.hex : '#8b5cf6';
+      }
+
+      chip.style.background = hexColor;
+      const meta = ev.allDay ? (ev.isHoliday ? '' : 'All day') : (ev.time ? ev.time : '');
       const repeatLabel = ev.repeat === 'yearly' ? ' 🎂' : (ev.repeat && ev.repeat !== 'none' ? ` · ${ev.repeat}` : '');
       chip.textContent = `${meta ? meta + ' ' : ''}${ev.title}${repeatLabel}`;
       chips.appendChild(chip);
@@ -671,7 +872,6 @@ try {
     const dObj = new Date(y, m, day);
     sheetDate.textContent = dObj.toLocaleString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 
-    // Reset to first tab (Quests) by default for minimalist clarity
     sheetTabs.forEach(t => t.classList.toggle('active', t.dataset.tab === 'quests'));
     sheetViews.forEach(v => v.classList.toggle('active', v.id === 'view-quests'));
 
@@ -718,11 +918,16 @@ try {
     events.forEach(ev => {
       const row = document.createElement('div');
       row.className = 'event-row';
-      const colorObj = COLORS.find(c => c.id === ev.color) || COLORS[0];
+      
+      let hexColor = ev.color;
+      if (!hexColor.startsWith('#')) {
+        const cObj = COLORS.find(c => c.id === ev.color);
+        hexColor = cObj ? cObj.hex : '#8b5cf6';
+      }
 
       const dot = document.createElement('div');
       dot.className = 'event-dot';
-      dot.style.background = colorObj.hex;
+      dot.style.background = hexColor;
       row.appendChild(dot);
 
       const info = document.createElement('div');
@@ -739,7 +944,7 @@ try {
         const meta = document.createElement('div');
         meta.className = 'event-meta';
         const detailParts = [...metaParts];
-        if (ev.allDay) detailParts.unshift('All day');
+        if (ev.allDay && !ev.isHoliday) detailParts.unshift('All day');
         if (ev.repeat === 'yearly') detailParts.push('🎂 Yearly Birthday');
         else if (ev.repeat && ev.repeat !== 'none') detailParts.push(`Repeats ${ev.repeat}`);
         if (ev.reminder && ev.reminder !== 'none') detailParts.push(`Alert ${ev.reminder}`);
@@ -752,7 +957,14 @@ try {
       const actions = document.createElement('div');
       actions.className = 'event-actions';
 
-      if (ev.isBubwebSynced) {
+      if (ev.isHoliday) {
+        const badge = document.createElement('span');
+        badge.style.fontSize = '11px';
+        badge.style.color = ev.color;
+        badge.style.fontWeight = '800';
+        badge.textContent = ev.isOff ? 'OFF' : (ev.isHindu ? 'Festival' : 'Observance');
+        actions.appendChild(badge);
+      } else if (ev.isBubwebSynced) {
         const badge = document.createElement('span');
         badge.style.fontSize = '11px';
         badge.style.color = 'var(--accent-purple)';
@@ -1211,7 +1423,6 @@ try {
           const diff = now.getTime() - reminderTime.getTime();
 
           if (diff >= 0 && diff < 180000 && now < eventDate) {
-            console.log(`🔔 Reminder triggered for: ${event.title} (${event.reminder})`);
             triggeredReminders.add(reminderId);
             triggerNotification(event, eventDate);
           }
