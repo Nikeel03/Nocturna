@@ -18,6 +18,36 @@ import {
   onValue 
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
 
+// Telegram Alert Configuration
+const TELEGRAM_CONFIG = {
+  botToken: '8972677443:AAGa0yJdicSsBxZO5zM3k8GWTA0J-fap_bM',
+  chatId: '1759979055'      
+};
+
+async function sendTelegramAlert(message) {
+  const hasPlaceholder = value => !value || value.startsWith('YOUR_');
+  if (hasPlaceholder(TELEGRAM_CONFIG.botToken) || hasPlaceholder(TELEGRAM_CONFIG.chatId)) return false;
+
+  const url = `https://api.telegram.org/bot${TELEGRAM_CONFIG.botToken}/sendMessage`;
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: TELEGRAM_CONFIG.chatId,
+        text: message,
+        parse_mode: 'HTML'
+      })
+    });
+    const data = await response.json();
+    return data.ok;
+  } catch (err) {
+    console.error('Telegram notification failed:', err);
+    return false;
+  }
+}
+
 // 1. Primary Nocturna Firebase (Auth + Firestore)
 const nocturnaConfig = {
   apiKey: "AIzaSyAjzmlmjB73S60nUw0vPrEJXq-y3-xlrG0",
@@ -1409,6 +1439,20 @@ function getSouthAfricanHolidaysForYear(year) {
     });
   }
 
+  const testTeleBtn = document.getElementById('btn-test-telegram');
+  if (testTeleBtn) {
+    testTeleBtn.addEventListener('click', async () => {
+      testTeleBtn.textContent = 'Sending...';
+      testTeleBtn.disabled = true;
+      const success = await sendTelegramAlert('🦉 <b>Nocturna Test</b>\nYour Telegram alerts are fully wired and working!');
+      testTeleBtn.textContent = success ? 'Sent to Telegram ✓' : 'Failed (Check Console)';
+      setTimeout(() => {
+        testTeleBtn.textContent = '✈️ Test Telegram Alert';
+        testTeleBtn.disabled = false;
+      }, 3000);
+    });
+  }
+
   function getReminderMilliseconds(reminderStr) {
     const match = reminderStr.match(/(\d+)([mhd\w])/);
     if (!match) return 0;
@@ -1423,6 +1467,12 @@ function getSouthAfricanHolidaysForYear(year) {
 
   function triggerNotification(event, dateObj) {
     const title = `Reminder: ${event.title}`;
+    const locationStr = event.location ? `\n📍 ${event.location}` : '';
+    const timeStr = event.time ? `\n⏰ ${formatTime(event.time)}` : '';
+
+    const telegramMessage = `🦉 <b>Nocturna Alert</b>\n<b>${event.title}</b>${timeStr}${locationStr}`;
+    sendTelegramAlert(telegramMessage);
+
     const options = {
       body: `${event.time ? formatTime(event.time) + ' · ' : ''}${event.location || 'Upcoming event'}`,
       tag: `nocturna-${event.id}`,
@@ -1434,6 +1484,138 @@ function getSouthAfricanHolidaysForYear(year) {
     } else if ('Notification' in window && Notification.permission === 'granted') {
       new Notification(title, options);
     }
+  }
+
+  // Birthday Wishes Mix-and-Mash Engine
+  const BDAY_OPENERS = [
+    'Happy Birthday [Name]! 🎉',
+    'Wishing you the happiest of birthdays, [Name]! 🎂',
+    'Happy, happy birthday [Name]! ✨',
+    'Have a wonderful birthday, [Name]! 🥳',
+    'Warmest birthday wishes to you, [Name]! 🎈'
+  ];
+
+  const BDAY_BODIES = [
+    'I hope you have an incredibly special day filled with love and laughter.',
+    'May your day be filled with happiness, good food, and great company.',
+    'Hope your year ahead is bright, blessed, and full of exciting adventures.',
+    'Wishing you a relaxing day and a year full of wonderful surprises.',
+    'I hope today brings you as much joy as you give to everyone around you.'
+  ];
+
+  const BDAY_CLOSERS = [
+    'Enjoy every minute of it! 🥂',
+    'Have the absolute best celebration! 🎁',
+    'Sending you huge love and big hugs today! 💛',
+    'Cheers to another fantastic trip around the sun! ☀️'
+  ];
+
+  function generateBirthdayWish(rawTitle) {
+    const cleanName = rawTitle
+      .replace(/🎂|🎉|🎈/g, '')
+      .replace(/[’']s?\s*birthday/gi, '')
+      .replace(/birthday[:\s-]*/gi, '')
+      .trim() || 'friend';
+
+    const opener = BDAY_OPENERS[Math.floor(Math.random() * BDAY_OPENERS.length)].replace('[Name]', cleanName);
+    const body = BDAY_BODIES[Math.floor(Math.random() * BDAY_BODIES.length)];
+    const closer = BDAY_CLOSERS[Math.floor(Math.random() * BDAY_CLOSERS.length)];
+    return `${opener} ${body} ${closer}`;
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  function showBirthdayBanner(title, wishText) {
+    let bannerStack = document.getElementById('nocturna-bday-banners');
+    if (!bannerStack) {
+      bannerStack = document.createElement('div');
+      bannerStack.id = 'nocturna-bday-banners';
+      bannerStack.className = 'bday-prompt-stack';
+      document.body.appendChild(bannerStack);
+    }
+
+    const banner = document.createElement('div');
+    banner.className = 'bday-prompt-banner';
+    bannerStack.appendChild(banner);
+
+    banner.innerHTML = `
+      <div class="bday-prompt-content">
+        <div class="bday-prompt-head">
+          <span>🎂 <strong>${escapeHtml(title)} Today!</strong></span>
+          <button type="button" class="bday-close-btn" aria-label="Close birthday greeting">&times;</button>
+        </div>
+        <p class="bday-wish-preview">"${escapeHtml(wishText)}"</p>
+        <div class="bday-prompt-actions">
+          <button type="button" class="btn-micro bday-copy-btn">📋 Copy Message</button>
+          <button type="button" class="btn-micro bday-reroll-btn">🎲 Reroll Wish</button>
+        </div>
+      </div>
+    `;
+
+    banner.classList.add('visible');
+
+    const copyBtn = banner.querySelector('.bday-copy-btn');
+    copyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(wishText);
+        copyBtn.textContent = 'Copied to Clipboard! ✓';
+        setTimeout(() => { copyBtn.textContent = '📋 Copy Message'; }, 2000);
+      } catch (err) {
+        copyBtn.textContent = 'Copy Failed';
+      }
+    });
+
+    const rerollBtn = banner.querySelector('.bday-reroll-btn');
+    rerollBtn.addEventListener('click', () => {
+      wishText = generateBirthdayWish(title);
+      banner.querySelector('.bday-wish-preview').textContent = `"${wishText}"`;
+    });
+
+    banner.querySelector('.bday-close-btn').addEventListener('click', () => {
+      banner.classList.remove('visible');
+      setTimeout(() => {
+        banner.remove();
+        if (!bannerStack.children.length) bannerStack.remove();
+      }, 250);
+    });
+  }
+
+  function checkBirthdayReminders() {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth();
+    const day = now.getDate();
+    const sevenAmToday = new Date(year, month, day, 7, 0, 0);
+
+    // A birthday is eligible any time after 7:00 AM, including when the app
+    // is opened later in the morning or afternoon.
+    if (now < sevenAmToday) return;
+
+    const todayKey = dateKey(year, month, day);
+    const events = getDayData(year, month, day).events || [];
+
+    events.forEach(event => {
+      const isBirthday = event.repeat === 'yearly' || /birthday|🎂/i.test(event.title || '');
+      if (!isBirthday) return;
+
+      const reminderId = `bday_7am_${todayKey}_${event.id || event.title}`;
+      if (triggeredReminders.has(reminderId)) return;
+      triggeredReminders.add(reminderId);
+
+      const generatedWish = generateBirthdayWish(event.title || 'friend');
+      const safeTitle = escapeHtml(event.title || 'Friend');
+      const safeWish = escapeHtml(generatedWish);
+      const telegramMessage = `🎂 <b>Birthday Today!</b>\nIt's <b>${safeTitle}</b> today.\n\n<i>Suggested greeting to copy:</i>\n"${safeWish}"`;
+      sendTelegramAlert(telegramMessage);
+      showBirthdayBanner(event.title || 'Friend', generatedWish);
+    });
   }
 
   function checkReminders() {
@@ -1473,6 +1655,8 @@ function getSouthAfricanHolidaysForYear(year) {
   }
 
   setInterval(checkReminders, 15000);
+  setInterval(checkBirthdayReminders, 60000);
+  setTimeout(checkBirthdayReminders, 2500);
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', async () => {
