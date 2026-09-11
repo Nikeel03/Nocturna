@@ -20,8 +20,8 @@ import {
 
 // Telegram Alert Configuration
 const TELEGRAM_CONFIG = {
-  botToken: '8972677443:AAGa0yJdicSsBxZO5zM3k8GWTA0J-fap_bM',
-  chatId: '1759979055'      
+  botToken: window.__ENV__?.TELEGRAM_BOT_TOKEN || '',
+  chatId: window.__ENV__?.TELEGRAM_CHAT_ID || ''
 };
 
 async function sendTelegramAlert(message) {
