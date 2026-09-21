@@ -300,6 +300,22 @@ function getSouthAfricanHolidaysForYear(year) {
   function monthKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
   function dateKey(y, m, day) { return y + '-' + pad(m + 1) + '-' + pad(day); }
 
+  function addMonthsClamped(dateString, monthDelta) {
+    const [year, month, day] = dateString.split('-').map(Number);
+    const targetMonth = month - 1 + monthDelta;
+    const targetYear = year + Math.floor(targetMonth / 12);
+    const normalizedMonth = ((targetMonth % 12) + 12) % 12;
+    const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
+    return dateKey(targetYear, normalizedMonth, Math.min(day, lastDay));
+  }
+
+  function addDaysToKey(dateString, days) {
+    const [year, month, day] = dateString.split('-').map(Number);
+    const result = new Date(year, month - 1, day);
+    result.setDate(result.getDate() + days);
+    return dateKey(result.getFullYear(), result.getMonth(), result.getDate());
+  }
+
   function getSession() {
     try { return JSON.parse(localStorage.getItem('nocturna:session') || 'null'); } catch (e) { return null; }
   }
@@ -370,6 +386,36 @@ function getSouthAfricanHolidaysForYear(year) {
       : { events: [], quests: [], complete: false };
     const directEvents = baseEntry.events || [];
     const recurringEvents = [];
+    const expiryEvents = [];
+    const targetDateKey = dateKey(y, m, day);
+
+    Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
+      Object.entries(monthData).forEach(([srcDayNum, srcDayEntry]) => {
+        (srcDayEntry.events || []).forEach(event => {
+          if (!event.expiryDate) return;
+
+          const sourceDate = `${srcMKey}-${pad(Number(srcDayNum))}`;
+          const markers = [
+            { date: event.expiryDate, kind: 'expiry', label: 'expires today' },
+            { date: addMonthsClamped(event.expiryDate, -1), kind: 'expiry-month', label: 'expires in 1 month' },
+            { date: addDaysToKey(event.expiryDate, -7), kind: 'expiry-week', label: 'expires in 1 week' }
+          ];
+
+          markers.filter(marker => marker.date === targetDateKey).forEach(marker => {
+            expiryEvents.push({
+              ...event,
+              id: `${event.id}-${marker.kind}`,
+              title: `${event.title} ${marker.label}`,
+              allDay: true,
+              color: marker.kind === 'expiry' ? '#ef4444' : '#f97316',
+              isExpiryMarker: true,
+              expiryMarkerKind: marker.kind,
+              originDate: sourceDate
+            });
+          });
+        });
+      });
+    });
 
     // Recurring Events
     Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
@@ -452,7 +498,8 @@ function getSouthAfricanHolidaysForYear(year) {
     return {
       ...baseEntry,
       dayColor: effectiveDayColor,
-      events: [...holidayEvents, ...directEvents, ...recurringEvents, ...bubwebEvents],
+      events: [...holidayEvents, ...directEvents, ...expiryEvents, ...recurringEvents, ...bubwebEvents],
+      hasExpiry: expiryEvents.some(event => event.expiryMarkerKind === 'expiry'),
       quests: baseEntry.quests || []
     };
   }
@@ -585,6 +632,7 @@ function getSouthAfricanHolidaysForYear(year) {
 
     const over = !!(entry && entry.complete) || isDayPast(ky, km - 1, kd);
     cell.classList.toggle('done', over);
+    cell.classList.toggle('expiry-day', !!entry?.hasExpiry);
     cell.innerHTML = '';
 
     const query = getSearchQuery();
@@ -598,8 +646,9 @@ function getSouthAfricanHolidaysForYear(year) {
     cell.classList.toggle('long-weekend-part', isLongWeekend);
 
     const dayColor = entry && entry.dayColor ? entry.dayColor : null;
-    cell.style.background = dayColor ? withAlpha(dayColor, 0.22) : (isWeekend ? 'rgba(37, 29, 56, 0.7)' : 'var(--surface)');
-    cell.style.borderColor = dayColor || (isWeekend ? 'rgba(167, 139, 250, 0.28)' : 'var(--border)');
+    const expiryDayColor = entry?.hasExpiry ? '#ef4444' : null;
+    cell.style.background = expiryDayColor ? withAlpha(expiryDayColor, 0.28) : (dayColor ? withAlpha(dayColor, 0.22) : (isWeekend ? 'rgba(37, 29, 56, 0.7)' : 'var(--surface)'));
+    cell.style.borderColor = expiryDayColor || dayColor || (isWeekend ? 'rgba(167, 139, 250, 0.28)' : 'var(--border)');
     cell.style.boxShadow = dayColor ? 'inset 0 0 0 1px ' + withAlpha(dayColor, 0.35) : (isLongWeekend ? '0 0 0 1.5px rgba(245, 158, 11, 0.5) inset' : 'none');
 
     const headRow = document.createElement('div');
@@ -711,6 +760,7 @@ function getSouthAfricanHolidaysForYear(year) {
     monthOffset = 0;
 
     globalCalendar = await fetchEntireCalendarFromCloud();
+    renderExpiryOverview();
 
     for (let i = 0; i < 6; i++) {
       await appendNextMonth();
@@ -759,6 +809,9 @@ function getSouthAfricanHolidaysForYear(year) {
   const allDayInput = document.getElementById('f-all-day');
   const repeatInput = document.getElementById('f-repeat');
   const reminderInput = document.getElementById('f-reminder');
+  const hasExpiryInput = document.getElementById('f-has-expiry');
+  const expiryDateInput = document.getElementById('f-expiry-date');
+  const expiryDateWrap = document.getElementById('expiry-date-wrap');
   const colorRow = document.getElementById('color-row');
   const dayColorPicker = document.getElementById('f-day-color');
   const saveBtn = document.getElementById('save-btn');
@@ -1035,6 +1088,13 @@ function getSouthAfricanHolidaysForYear(year) {
         badge.style.fontWeight = '800';
         badge.textContent = ev.isOff ? 'OFF' : (ev.isHindu ? 'Festival' : 'Observance');
         actions.appendChild(badge);
+      } else if (ev.isExpiryMarker) {
+        const badge = document.createElement('span');
+        badge.style.fontSize = '11px';
+        badge.style.color = ev.expiryMarkerKind === 'expiry' ? '#f87171' : '#fb923c';
+        badge.style.fontWeight = '800';
+        badge.textContent = ev.expiryMarkerKind === 'expiry' ? 'Expiry' : 'Reminder';
+        actions.appendChild(badge);
       } else if (ev.isBubwebSynced) {
         const badge = document.createElement('span');
         badge.style.fontSize = '11px';
@@ -1081,6 +1141,9 @@ function getSouthAfricanHolidaysForYear(year) {
     allDayInput.checked = false;
     repeatInput.value = 'none';
     reminderInput.value = 'none';
+    hasExpiryInput.checked = false;
+    expiryDateInput.value = '';
+    expiryDateWrap.style.display = 'none';
     formErr.style.display = 'none';
     setSelectedColor('violet');
     dayColorPicker.value = '#8b5cf6';
@@ -1097,6 +1160,9 @@ function getSouthAfricanHolidaysForYear(year) {
     allDayInput.checked = !!ev.allDay;
     repeatInput.value = ev.repeat || 'none';
     reminderInput.value = ev.reminder || 'none';
+    hasExpiryInput.checked = !!ev.expiryDate;
+    expiryDateInput.value = ev.expiryDate || '';
+    expiryDateWrap.style.display = hasExpiryInput.checked ? 'block' : 'none';
     setSelectedColor(ev.color || 'violet');
     saveBtn.textContent = 'Update Event';
     cancelEditBtn.style.display = 'block';
@@ -1104,6 +1170,11 @@ function getSouthAfricanHolidaysForYear(year) {
   }
 
   cancelEditBtn.addEventListener('click', resetForm);
+
+  hasExpiryInput.addEventListener('change', () => {
+    expiryDateWrap.style.display = hasExpiryInput.checked ? 'block' : 'none';
+    if (hasExpiryInput.checked && !expiryDateInput.value) expiryDateInput.focus();
+  });
 
   async function deleteEvent(ev) {
     const targetDate = ev.originDate || activeDateKey;
@@ -1113,6 +1184,7 @@ function getSouthAfricanHolidaysForYear(year) {
     if (globalCalendar[targetMonth] && globalCalendar[targetMonth][targetDay]) {
       globalCalendar[targetMonth][targetDay].events = (globalCalendar[targetMonth][targetDay].events || []).filter(e => e.id !== ev.id);
       await syncCalendarToCloud();
+      renderExpiryOverview();
       repaintAllVisibleCells();
       renderSheetContents();
     }
@@ -1128,7 +1200,7 @@ function getSouthAfricanHolidaysForYear(year) {
     }
     formErr.style.display = 'none';
 
-    if (reminderInput.value !== 'none' && 'Notification' in window) {
+    if ((reminderInput.value !== 'none' || hasExpiryInput.checked) && 'Notification' in window) {
       if (Notification.permission === 'default') {
         Notification.requestPermission();
       }
@@ -1147,6 +1219,21 @@ function getSouthAfricanHolidaysForYear(year) {
     const normalizedRepeat = repeatInput.value || 'none';
     const allDay = !!allDayInput.checked;
     const reminder = reminderInput.value || 'none';
+    const expiryDate = hasExpiryInput.checked ? expiryDateInput.value : '';
+
+    if (hasExpiryInput.checked && !expiryDate) {
+      formErr.textContent = 'Choose an expiry date first.';
+      formErr.style.display = 'block';
+      expiryDateInput.focus();
+      return;
+    }
+    if (hasExpiryInput.checked && expiryDate < saveTargetDate) {
+      formErr.textContent = 'Expiry date must be on or after the renewal date.';
+      formErr.style.display = 'block';
+      expiryDateInput.focus();
+      return;
+    }
+    formErr.textContent = 'Give the event a name first.';
 
     if (editingId) {
       const idx = entry.events.findIndex(ev => ev.id === editingId);
@@ -1158,6 +1245,7 @@ function getSouthAfricanHolidaysForYear(year) {
           allDay, 
           repeat: normalizedRepeat, 
           reminder, 
+          expiryDate,
           location: locInput.value.trim(), 
           color: selectedColor 
         };
@@ -1170,12 +1258,14 @@ function getSouthAfricanHolidaysForYear(year) {
         allDay, 
         repeat: normalizedRepeat, 
         reminder, 
+        expiryDate,
         location: locInput.value.trim(), 
         color: selectedColor
       });
     }
 
     await syncCalendarToCloud();
+    renderExpiryOverview();
     repaintAllVisibleCells();
     resetForm();
     renderSheetContents();
@@ -1264,6 +1354,110 @@ function getSouthAfricanHolidaysForYear(year) {
   const authError = document.getElementById('auth-error');
   const authButton = document.getElementById('auth-button');
   const logoutButton = document.getElementById('logout-button');
+  const expirySummary = document.querySelector('.expiry-summary');
+  const expirySummaryButton = document.getElementById('expiry-summary-button');
+  const expiryOverview = document.getElementById('expiry-overview');
+  const expiryOverviewList = document.getElementById('expiry-overview-list');
+  const expiryStatusCount = document.getElementById('expiry-status-count');
+  const expiryOverviewClose = document.getElementById('expiry-overview-close');
+
+  function localDateFromKey(key) {
+    const [year, month, day] = key.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+
+  function formatExpiryDate(key) {
+    return localDateFromKey(key).toLocaleDateString('en-ZA', {
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric'
+    });
+  }
+
+  function getExpiryItems() {
+    const items = [];
+    Object.entries(globalCalendar).forEach(([monthKeyValue, monthData]) => {
+      Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
+        (dayEntry.events || []).forEach(event => {
+          if (!event.expiryDate) return;
+          items.push({
+            id: event.id,
+            title: event.title,
+            renewalDate: `${monthKeyValue}-${pad(Number(dayKey))}`,
+            expiryDate: event.expiryDate
+          });
+        });
+      });
+    });
+    return items.sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+  }
+
+  function getExpiryStatus(expiryDate) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const expiry = localDateFromKey(expiryDate);
+    const soonLimit = new Date(today);
+    soonLimit.setMonth(soonLimit.getMonth() + 1);
+
+    if (expiry < today) return { id: 'expired', label: 'Expired', className: 'status-red' };
+    if (expiry <= soonLimit) return { id: 'soon', label: 'About to expire', className: 'status-orange' };
+    return { id: 'okay', label: 'Renewed', className: 'status-green' };
+  }
+
+  function renderExpiryOverview() {
+    if (!expiryOverviewList || !expiryStatusCount) return;
+    const items = getExpiryItems();
+    const counts = { expired: 0, soon: 0, okay: 0 };
+
+    expiryOverviewList.innerHTML = '';
+    expiryStatusCount.textContent = `${items.length} tracked`;
+
+    if (!items.length) {
+      expiryOverviewList.innerHTML = '<p class="expiry-empty">No renewal dates tracked yet.</p>';
+      return;
+    }
+
+    items.forEach(item => {
+      const status = getExpiryStatus(item.expiryDate);
+      counts[status.id] += 1;
+
+      const row = document.createElement('div');
+      row.className = 'expiry-overview-row';
+
+      const dot = document.createElement('span');
+      dot.className = `status-dot ${status.className}`;
+      dot.setAttribute('aria-label', status.label);
+      row.appendChild(dot);
+
+      const info = document.createElement('div');
+      info.className = 'expiry-overview-info';
+      const title = document.createElement('strong');
+      title.textContent = item.title;
+      const detail = document.createElement('span');
+      detail.textContent = `${status.label} · Expires ${formatExpiryDate(item.expiryDate)}`;
+      info.append(title, detail);
+      row.appendChild(info);
+      expiryOverviewList.appendChild(row);
+    });
+
+    expirySummary.querySelector('.status-dot-green').dataset.count = counts.okay;
+    expirySummary.querySelector('.status-dot-orange').dataset.count = counts.soon;
+    expirySummary.querySelector('.status-dot-red').dataset.count = counts.expired;
+  }
+
+  function setExpiryOverviewOpen(isOpen) {
+    expiryOverview.hidden = !isOpen;
+    expirySummaryButton.setAttribute('aria-expanded', String(isOpen));
+  }
+
+  expirySummaryButton.addEventListener('click', () => {
+    renderExpiryOverview();
+    setExpiryOverviewOpen(expiryOverview.hidden);
+  });
+  expiryOverviewClose.addEventListener('click', () => setExpiryOverviewOpen(false));
+  document.addEventListener('click', event => {
+    if (!expirySummary.contains(event.target)) setExpiryOverviewOpen(false);
+  });
 
   function setAuthMode(mode) {
     authModeInput.value = mode;
@@ -1382,6 +1576,8 @@ function getSouthAfricanHolidaysForYear(year) {
     authButton.textContent = isLoggedIn ? (displayName || 'User') : 'Log in';
     authButton.classList.toggle('is-user', isLoggedIn);
     logoutButton.style.display = isLoggedIn ? 'inline-flex' : 'none';
+    expirySummary.style.display = isLoggedIn ? 'block' : 'none';
+    renderExpiryOverview();
     if (!isLoggedIn) showAuth();
   }
 
@@ -1654,8 +1850,24 @@ function getSouthAfricanHolidaysForYear(year) {
     });
   }
 
+  function checkExpiryReminders() {
+    const now = new Date();
+    const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
+    const expiryMarkers = (getDayData(now.getFullYear(), now.getMonth(), now.getDate()).events || [])
+      .filter(event => event.isExpiryMarker);
+
+    expiryMarkers.forEach(event => {
+      const reminderId = `expiry_${todayKey}_${event.id}`;
+      if (triggeredReminders.has(reminderId)) return;
+      triggeredReminders.add(reminderId);
+      triggerNotification(event, now);
+    });
+  }
+
   setInterval(checkReminders, 15000);
+  setInterval(checkExpiryReminders, 15000);
   setInterval(checkBirthdayReminders, 60000);
+  setTimeout(checkExpiryReminders, 2500);
   setTimeout(checkBirthdayReminders, 2500);
 
   if ('serviceWorker' in navigator) {

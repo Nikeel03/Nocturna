@@ -90,6 +90,26 @@
 
   <div class="top-actions">
     <button id="auth-button" class="primary-button">Log in</button>
+    <div class="expiry-summary">
+      <button type="button" id="expiry-summary-button" class="expiry-summary-button" aria-label="View renewal expiry status" aria-expanded="false">
+        <span class="expiry-dots" aria-hidden="true">
+          <span class="status-dot status-dot-green"></span>
+          <span class="status-dot status-dot-orange"></span>
+          <span class="status-dot status-dot-red"></span>
+        </span>
+        <span id="expiry-status-count">0 tracked</span>
+      </button>
+      <div id="expiry-overview" class="expiry-overview" hidden>
+        <div class="expiry-overview-head">
+          <div>
+            <h3>Renewals</h3>
+            <p>Keep track of documents and memberships.</p>
+          </div>
+          <button type="button" id="expiry-overview-close" class="sheet-close" aria-label="Close renewal overview">&times;</button>
+        </div>
+        <div id="expiry-overview-list" class="expiry-overview-list"></div>
+      </div>
+    </div>
     <button id="logout-button" class="ghost-button">Log out</button>
   </div>
 </header>
@@ -143,7 +163,19 @@
       <form class="event-form" id="event-form">
         <div class="field">
           <label for="f-title">Event</label>
-          <input type="text" id="f-title" placeholder="What's happening?" maxlength="60">
+          <input type="text" id="f-title" list="renewal-suggestions" placeholder="What's happening?" maxlength="60">
+          <datalist id="renewal-suggestions">
+            <option value="Passport"></option>
+            <option value="South African ID document"></option>
+            <option value="Driver's licence card"></option>
+            <option value="Vehicle licence disc"></option>
+            <option value="Professional Driving Permit"></option>
+            <option value="Roadworthy certificate"></option>
+            <option value="TV licence"></option>
+            <option value="Firearm licence"></option>
+            <option value="Medical aid membership"></option>
+            <option value="Car insurance"></option>
+          </datalist>
         </div>
         <div class="row2">
           <div class="field">
@@ -182,6 +214,16 @@
               <option value="1w">1 week before</option>
             </select>
           </div>
+        </div>
+        <div class="field toggle-row">
+          <label for="f-has-expiry">Track expiry date</label>
+          <div class="toggle-wrap">
+            <input type="checkbox" id="f-has-expiry">
+          </div>
+        </div>
+        <div class="field" id="expiry-date-wrap" style="display:none;">
+          <label for="f-expiry-date">Expires on</label>
+          <input type="date" id="f-expiry-date">
         </div>
         <div class="field">
           <label>Event Color</label>
