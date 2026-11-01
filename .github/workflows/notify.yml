@@ -1,0 +1,65 @@
+name: Nocturna notifier
+
+# Runs every 15 minutes, even when the web app is closed.
+# GitHub may delay scheduled runs by a few minutes at busy times.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'auto = normal run, test = send a test + briefing now, digest = force morning briefing, evening = force tomorrow preview'
+        type: choice
+        options: [auto, test, digest, evening]
+        default: test
+
+concurrency:
+  group: nocturna-notifier
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: write   # only used by the keep-alive step below
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: notifier
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: notifier/package-lock.json
+
+      - run: npm ci --omit=dev --no-audit --no-fund
+
+      - name: Send notifications
+        run: node notify.js
+        env:
+          MODE: ${{ inputs.mode || 'auto' }}
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          NOCTURNA_USERNAME: ${{ vars.NOCTURNA_USERNAME }}
+          NOCTURNA_APP_URL: ${{ vars.NOCTURNA_APP_URL }}
+          DIGEST_TIME: ${{ vars.DIGEST_TIME || '06:30' }}
+          EVENING_TIME: ${{ vars.EVENING_TIME || '20:00' }}
+
+      # GitHub pauses scheduled workflows in repos with no commits for 60 days.
+      # Re-enabling the workflow once a day keeps the notifier alive.
+      - name: Keep schedule alive
+        if: github.event_name == 'schedule' && github.event.schedule == '*/15 * * * *'
+        continue-on-error: true
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "$(date -u +%H%M)" \< "0015" ]; then
+            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/notify.yml/enable" || true
+          fi

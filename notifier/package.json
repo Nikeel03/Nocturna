@@ -1,0 +1,12 @@
+{
+  "name": "nocturna-notifier",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "notify": "node notify.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.7.0"
+  }
+}

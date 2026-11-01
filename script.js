@@ -10,43 +10,19 @@ import {
   getFirestore, 
   doc, 
   setDoc, 
-  getDoc 
+  getDoc,
+  onSnapshot
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
 import { 
   getDatabase, 
   ref as dbRef, 
   onValue 
 } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-database.js';
-
-// Telegram Alert Configuration
-const TELEGRAM_CONFIG = {
-  botToken: window.__ENV__?.TELEGRAM_BOT_TOKEN || '',
-  chatId: window.__ENV__?.TELEGRAM_CHAT_ID || ''
-};
-
-async function sendTelegramAlert(message) {
-  const hasPlaceholder = value => !value || value.startsWith('YOUR_');
-  if (hasPlaceholder(TELEGRAM_CONFIG.botToken) || hasPlaceholder(TELEGRAM_CONFIG.chatId)) return false;
-
-  const url = `https://api.telegram.org/bot${TELEGRAM_CONFIG.botToken}/sendMessage`;
-
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        chat_id: TELEGRAM_CONFIG.chatId,
-        text: message,
-        parse_mode: 'HTML'
-      })
-    });
-    const data = await response.json();
-    return data.ok;
-  } catch (err) {
-    console.error('Telegram notification failed:', err);
-    return false;
-  }
-}
+import {
+  computeDay, dueReminders, getExpiryItems as coreExpiryItems, getExpiryStatus as coreExpiryStatus,
+  upcomingBirthdays, nextPublicHoliday, sortEvents, isBirthdayEvent, generateBirthdayWish,
+  addDaysToKey as coreAddDays, daysBetween, REMINDER_MS
+} from './calendar-core.js';
 
 // 1. Primary Nocturna Firebase (Auth + Firestore)
 const nocturnaConfig = {
@@ -75,6 +51,7 @@ const bubwebConfig = {
 };
 
 let bubwebActivities = [];
+let onBubwebChange = () => {};
 
 try {
   const bubwebApp = initializeApp(bubwebConfig, "bubwebBridge");
@@ -82,169 +59,11 @@ try {
   const activitiesRef = dbRef(bubwebDb, 'activities');
   onValue(activitiesRef, (snapshot) => {
     const data = snapshot.val();
-    bubwebActivities = data ? (Array.isArray(data) ? data : Object.values(data)) : [];
-    repaintAllVisibleCells();
+    bubwebActivities = data ? (Array.isArray(data) ? data : Object.values(data)).filter(Boolean) : [];
+    onBubwebChange();
   });
 } catch (e) {
   console.warn("Bubweb bridge init warning:", e);
-}
-
-// --- Future-Proofed Astronomical Calculations ---
-function calculateEasterSunday(year) {
-  const a = year % 19;
-  const b = Math.floor(year / 100);
-  const c = year % 100;
-  const d = Math.floor(b / 4);
-  const e = b % 4;
-  const f = Math.floor((b + 8) / 25);
-  const g = Math.floor((b - f + 1) / 3);
-  const h = (19 * a + b - d - g + 15) % 30;
-  const i = Math.floor(c / 4);
-  const k = c % 4;
-  const l = (32 + 2 * e + 2 * i - h - k) % 7;
-  const m = Math.floor((a + 11 * h + 22 * l) / 451);
-  const month = Math.floor((h + l - 7 * m + 114) / 31) - 1;
-  const day = ((h + l - 7 * m + 114) % 31) + 1;
-  return new Date(year, month, day);
-}
-
-function getNthWeekdayOfMonth(year, month, weekday, n) {
-  let count = 0;
-  for (let d = 1; d <= 31; d++) {
-    const testDate = new Date(year, month, d);
-    if (testDate.getMonth() !== month) break;
-    if (testDate.getDay() === weekday) {
-      count++;
-      if (count === n) return d;
-    }
-  }
-  return 1;
-}
-
-// Fixed: Added missing 1st Wednesday of the month function
-function getFirstWednesdayOfMonth(year, month) {
-  for (let d = 1; d <= 7; d++) {
-    const testDate = new Date(year, month, d);
-    if (testDate.getDay() === 3) { // 3 = Wednesday
-      return d;
-    }
-  }
-  return 1;
-}
-
-// Hindu Lunisolar Panchang Calendar (Lookup + Metonic Fallback)
-const HINDU_FESTIVALS_TABLE = {
-  2024: { diwali: '10-31', shivaratri: '03-08', janmashtami: '08-26', kavady: '01-25' },
-  2025: { diwali: '10-20', shivaratri: '02-26', janmashtami: '08-16', kavady: '02-10' },
-  2026: { diwali: '11-08', shivaratri: '02-15', janmashtami: '09-04', kavady: '02-01' },
-  2027: { diwali: '10-28', shivaratri: '03-06', janmashtami: '08-25', kavady: '01-22' },
-  2028: { diwali: '10-17', shivaratri: '02-23', janmashtami: '08-13', kavady: '02-09' },
-  2029: { diwali: '11-05', shivaratri: '02-11', janmashtami: '08-31', kavady: '01-29' },
-  2030: { diwali: '10-26', shivaratri: '03-02', janmashtami: '08-21', kavady: '01-18' },
-  2031: { diwali: '11-14', shivaratri: '02-20', janmashtami: '08-10', kavady: '02-06' },
-  2032: { diwali: '11-02', shivaratri: '03-09', janmashtami: '08-28', kavady: '01-26' },
-  2033: { diwali: '10-22', shivaratri: '02-27', janmashtami: '08-17', kavady: '02-14' },
-  2034: { diwali: '11-10', shivaratri: '02-17', janmashtami: '09-05', kavady: '02-03' },
-  2035: { diwali: '10-30', shivaratri: '03-07', janmashtami: '08-26', kavady: '01-24' }
-};
-
-function getHinduFestivalsForYear(year) {
-  if (HINDU_FESTIVALS_TABLE[year]) {
-    return HINDU_FESTIVALS_TABLE[year];
-  }
-  const baseYear = 2024 + ((year - 2024) % 19);
-  return HINDU_FESTIVALS_TABLE[baseYear] || HINDU_FESTIVALS_TABLE[2026];
-}
-
-function getSouthAfricanHolidaysForYear(year) {
-  const holidays = {};
-
-  function addHoliday(m, d, name, color, isOff = true, note = '', isHindu = false) {
-    const dStr = `${year}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-    const dateObj = new Date(year, m - 1, d);
-    holidays[dStr] = { name, color, isOff, note, dayColor: color, isHindu };
-
-    if (isOff && dateObj.getDay() === 0) {
-      const monDate = new Date(year, m - 1, d + 1);
-      const monKey = `${monDate.getFullYear()}-${String(monDate.getMonth() + 1).padStart(2, '0')}-${String(monDate.getDate()).padStart(2, '0')}`;
-      holidays[monKey] = {
-        name: `${name} (Observed)`,
-        color,
-        isOff: true,
-        note: 'Public Holiday (Sunday Roll-over)',
-        dayColor: color,
-        isHindu: false
-      };
-    }
-  }
-
-  // 1. Statutory National Public Holidays
-  addHoliday(1, 1, "New Year's Day", "#ef4444", true);
-  addHoliday(3, 21, "Human Rights Day", "#e11d48", true);
-  addHoliday(4, 27, "Freedom Day", "#f59e0b", true);
-  addHoliday(5, 1, "Workers' Day", "#e11d48", true);
-  addHoliday(6, 16, "Youth Day", "#0284c7", true);
-  addHoliday(8, 9, "National Women's Day", "#ec4899", true);
-  addHoliday(9, 24, "Heritage Day", "#10b981", true);
-  addHoliday(12, 16, "Day of Reconciliation", "#10b981", true);
-  addHoliday(12, 25, "Christmas Day", "#ef4444", true);
-  addHoliday(12, 26, "Day of Goodwill", "#ef4444", true);
-
-  // 2. Computed Easter Holidays
-  const easterSunday = calculateEasterSunday(year);
-  const goodFriday = new Date(easterSunday);
-  goodFriday.setDate(easterSunday.getDate() - 2);
-  const familyDay = new Date(easterSunday);
-  familyDay.setDate(easterSunday.getDate() + 1);
-
-  addHoliday(goodFriday.getMonth() + 1, goodFriday.getDate(), "Good Friday", "#6366f1", true);
-  addHoliday(familyDay.getMonth() + 1, familyDay.getDate(), "Family Day", "#6366f1", true);
-
-  // 3. Hindu Sacred Festivals
-  const hinduData = getHinduFestivalsForYear(year);
-
-  if (hinduData.diwali) {
-    const [dm, dd] = hinduData.diwali.split('-').map(Number);
-    addHoliday(dm, dd, "Diwali (Deepavali)", "#f97316", false, "Festival of Lights", true);
-  }
-  if (hinduData.shivaratri) {
-    const [sm, sd] = hinduData.shivaratri.split('-').map(Number);
-    addHoliday(sm, sd, "Maha Shivaratri", "#8b5cf6", false, "Great Night of Shiva", true);
-  }
-  if (hinduData.janmashtami) {
-    const [jm, jd] = hinduData.janmashtami.split('-').map(Number);
-    addHoliday(jm, jd, "Krishna Janmashtami", "#06b6d4", false, "Birth of Lord Krishna", true);
-  }
-  if (hinduData.kavady) {
-    const [km, kd] = hinduData.kavady.split('-').map(Number);
-    addHoliday(km, kd, "Thaipoosam Kavady", "#eab308", false, "Murugan Devotion & Penance", true);
-  }
-
-  // 4. Cultural Observances
-  const mothersDay = getNthWeekdayOfMonth(year, 4, 0, 2);
-  const fathersDay = getNthWeekdayOfMonth(year, 5, 0, 3);
-  addHoliday(5, mothersDay, "Mother's Day", "#a855f7", false, "Special Sunday");
-  addHoliday(6, fathersDay, "Father's Day", "#3b82f6", false, "Special Sunday");
-  addHoliday(12, 31, "New Year's Eve", "#facc15", false, "Celebration");
-
-  // 5. Fuel Price Change Day (1st Wednesday of every month)
-  for (let m = 1; m <= 12; m++) {
-    const firstWedDay = getFirstWednesdayOfMonth(year, m - 1);
-    const dStr = `${year}-${String(m).padStart(2, '0')}-${String(firstWedDay).padStart(2, '0')}`;
-    
-    if (!holidays[dStr]) {
-      holidays[dStr] = {
-        name: "Fuel Price Adjustment",
-        color: "#f59e0b",
-        isOff: false,
-        note: "Official DMPR / CEF Fuel Price Adjustment Day",
-        dayColor: null,
-        isFuel: true
-      };
-    }
-  } 
-
-  return holidays;
 }
 
 (function () {
@@ -294,27 +113,11 @@ function getSouthAfricanHolidaysForYear(year) {
   let isLoading = false;
   let triggeredReminders = new Set();
   let swRegistration = null;
-  let holidayCacheByYear = {};
+  let unsubscribeLiveSync = null;
 
   function pad(n) { return String(n).padStart(2, '0'); }
   function monthKey(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1); }
   function dateKey(y, m, day) { return y + '-' + pad(m + 1) + '-' + pad(day); }
-
-  function addMonthsClamped(dateString, monthDelta) {
-    const [year, month, day] = dateString.split('-').map(Number);
-    const targetMonth = month - 1 + monthDelta;
-    const targetYear = year + Math.floor(targetMonth / 12);
-    const normalizedMonth = ((targetMonth % 12) + 12) % 12;
-    const lastDay = new Date(targetYear, normalizedMonth + 1, 0).getDate();
-    return dateKey(targetYear, normalizedMonth, Math.min(day, lastDay));
-  }
-
-  function addDaysToKey(dateString, days) {
-    const [year, month, day] = dateString.split('-').map(Number);
-    const result = new Date(year, month - 1, day);
-    result.setDate(result.getDate() + days);
-    return dateKey(result.getFullYear(), result.getMonth(), result.getDate());
-  }
 
   function getSession() {
     try { return JSON.parse(localStorage.getItem('nocturna:session') || 'null'); } catch (e) { return null; }
@@ -368,140 +171,37 @@ function getSouthAfricanHolidaysForYear(year) {
     }
   }
 
-  function getSAHoliday(y, m, day) {
-    if (!holidayCacheByYear[y]) {
-      holidayCacheByYear[y] = getSouthAfricanHolidaysForYear(y);
-    }
-    const dKey = dateKey(y, m, day);
-    return holidayCacheByYear[y][dKey] || null;
+  function getDayData(y, m, day) {
+    return computeDay(globalCalendar, dateKey(y, m, day), bubwebActivities);
   }
 
-  function getDayData(y, m, day) {
-    const dKey = dateKey(y, m, day);
-    const mKey = dKey.slice(0, 7);
-    const dNum = pad(day);
+  function todayKey() {
+    const t = new Date();
+    return dateKey(t.getFullYear(), t.getMonth(), t.getDate());
+  }
 
-    const baseEntry = (globalCalendar[mKey] && globalCalendar[mKey][dNum]) 
-      ? JSON.parse(JSON.stringify(globalCalendar[mKey][dNum])) 
-      : { events: [], quests: [], complete: false };
-    const directEvents = baseEntry.events || [];
-    const recurringEvents = [];
-    const expiryEvents = [];
-    const targetDateKey = dateKey(y, m, day);
+  // Re-render everything that depends on calendar data.
+  function refreshAllViews() {
+    repaintAllVisibleCells();
+    renderExpiryOverview();
+    renderAgenda();
+    updateAppBadge();
+    if (activeDateKey && sheet.classList.contains('open')) renderSheetContents();
+  }
 
-    Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
-      Object.entries(monthData).forEach(([srcDayNum, srcDayEntry]) => {
-        (srcDayEntry.events || []).forEach(event => {
-          if (!event.expiryDate) return;
-
-          const sourceDate = `${srcMKey}-${pad(Number(srcDayNum))}`;
-          const markers = [
-            { date: event.expiryDate, kind: 'expiry', label: 'expires today' },
-            { date: addMonthsClamped(event.expiryDate, -1), kind: 'expiry-month', label: 'expires in 1 month' },
-            { date: addDaysToKey(event.expiryDate, -7), kind: 'expiry-week', label: 'expires in 1 week' }
-          ];
-
-          markers.filter(marker => marker.date === targetDateKey).forEach(marker => {
-            expiryEvents.push({
-              ...event,
-              id: `${event.id}-${marker.kind}`,
-              title: `${event.title} ${marker.label}`,
-              allDay: true,
-              color: marker.kind === 'expiry' ? '#ef4444' : '#f97316',
-              isExpiryMarker: true,
-              expiryMarkerKind: marker.kind,
-              originDate: sourceDate
-            });
-          });
-        });
-      });
-    });
-
-    // Recurring Events
-    Object.entries(globalCalendar).forEach(([srcMKey, monthData]) => {
-      const [srcY, srcM] = srcMKey.split('-').map(Number);
-
-      Object.entries(monthData).forEach(([srcDayNum, srcDayEntry]) => {
-        if (!srcDayEntry.events) return;
-
-        srcDayEntry.events.forEach(ev => {
-          if (!ev.repeat || ev.repeat === 'none') return;
-          const origDay = Number(srcDayNum);
-          let isMatch = false;
-
-          if (ev.repeat === 'yearly') {
-            if (srcM === (m + 1) && origDay === day) isMatch = true;
-          } else if (ev.repeat === 'monthly') {
-            if (origDay === day) {
-              const srcDate = new Date(srcY, srcM - 1, origDay);
-              const targetDate = new Date(y, m, day);
-              if (targetDate >= srcDate) isMatch = true;
-            }
-          } else if (ev.repeat === 'daily') {
-            const srcDate = new Date(srcY, srcM - 1, origDay);
-            const targetDate = new Date(y, m, day);
-            if (targetDate >= srcDate) isMatch = true;
-          } else if (ev.repeat === 'weekly') {
-            const srcDate = new Date(srcY, srcM - 1, origDay);
-            const targetDate = new Date(y, m, day);
-            if (targetDate >= srcDate && targetDate.getDay() === srcDate.getDay()) isMatch = true;
-          }
-
-          if (isMatch) {
-            if (srcMKey === mKey && origDay === day) return;
-            recurringEvents.push({
-              ...ev,
-              isRecurringInstance: true,
-              originDate: `${srcMKey}-${pad(origDay)}`
-            });
-          }
-        });
-      });
-    });
-
-    // Realtime Bubweb Activities
-    const bubwebEvents = [];
-    bubwebActivities.forEach(act => {
-      if (act.date === dKey) {
-        bubwebEvents.push({
-          id: `bub-${act.id}`,
-          title: `🎈 ${act.name}`,
-          time: act.time || '',
-          allDay: !act.time,
-          location: 'BubAdventure',
-          color: 'pink',
-          isBubwebSynced: true,
-          completed: !!act.completed
-        });
-      }
-    });
-
-    // Dynamic South African Public Holiday & Hindu Observance Injection
-    const saHoliday = getSAHoliday(y, m, day);
-    const holidayEvents = [];
-    if (saHoliday) {
-      const icon = saHoliday.isOff ? '🇿🇦 ' : (saHoliday.isHindu ? '🪔 ' : '✨ ');
-      holidayEvents.push({
-        id: `sa-holiday-${dKey}`,
-        title: `${icon}${saHoliday.name}`,
-        allDay: true,
-        location: saHoliday.note || (saHoliday.isOff ? 'Public Holiday (Paid Off)' : 'Observance'),
-        color: saHoliday.color,
-        isHoliday: true,
-        isOff: saHoliday.isOff,
-        isHindu: !!saHoliday.isHindu
-      });
-    }
-
-    const effectiveDayColor = baseEntry.dayColor || (saHoliday ? saHoliday.dayColor : null);
-
-    return {
-      ...baseEntry,
-      dayColor: effectiveDayColor,
-      events: [...holidayEvents, ...directEvents, ...expiryEvents, ...recurringEvents, ...bubwebEvents],
-      hasExpiry: expiryEvents.some(event => event.expiryMarkerKind === 'expiry'),
-      quests: baseEntry.quests || []
-    };
+  // Keep this device in sync with changes from other devices and the
+  // Telegram bot, so a stale tab never overwrites newer data.
+  function startLiveSync() {
+    if (unsubscribeLiveSync) { unsubscribeLiveSync(); unsubscribeLiveSync = null; }
+    if (!auth.currentUser) return;
+    unsubscribeLiveSync = onSnapshot(doc(db, 'users', auth.currentUser.uid), (snap) => {
+      if (snap.metadata.hasPendingWrites || !snap.exists()) return;
+      const remote = snap.data().calendar || {};
+      if (JSON.stringify(remote) === JSON.stringify(globalCalendar)) return;
+      globalCalendar = remote;
+      localStorage.setItem(`nocturna:${currentUserKey()}:full_calendar`, JSON.stringify(globalCalendar));
+      refreshAllViews();
+    }, (err) => console.warn('Live sync error:', err));
   }
 
   function isToday(y, m, day) {
@@ -761,11 +461,16 @@ function getSouthAfricanHolidaysForYear(year) {
 
     globalCalendar = await fetchEntireCalendarFromCloud();
     renderExpiryOverview();
+    renderAgenda();
+    updateAppBadge();
 
     for (let i = 0; i < 6; i++) {
       await appendNextMonth();
     }
+    startLiveSync();
   }
+
+  onBubwebChange = () => { repaintAllVisibleCells(); renderAgenda(); };
 
   if (typeof IntersectionObserver !== 'undefined' && sentinel) {
     const observer = new IntersectionObserver((entries) => {
@@ -1375,33 +1080,11 @@ function getSouthAfricanHolidaysForYear(year) {
   }
 
   function getExpiryItems() {
-    const items = [];
-    Object.entries(globalCalendar).forEach(([monthKeyValue, monthData]) => {
-      Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
-        (dayEntry.events || []).forEach(event => {
-          if (!event.expiryDate) return;
-          items.push({
-            id: event.id,
-            title: event.title,
-            renewalDate: `${monthKeyValue}-${pad(Number(dayKey))}`,
-            expiryDate: event.expiryDate
-          });
-        });
-      });
-    });
-    return items.sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+    return coreExpiryItems(globalCalendar);
   }
 
   function getExpiryStatus(expiryDate) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const expiry = localDateFromKey(expiryDate);
-    const soonLimit = new Date(today);
-    soonLimit.setMonth(soonLimit.getMonth() + 1);
-
-    if (expiry < today) return { id: 'expired', label: 'Expired', className: 'status-red' };
-    if (expiry <= soonLimit) return { id: 'soon', label: 'About to expire', className: 'status-orange' };
-    return { id: 'okay', label: 'Renewed', className: 'status-green' };
+    return coreExpiryStatus(expiryDate, todayKey());
   }
 
   function renderExpiryOverview() {
@@ -1578,7 +1261,8 @@ function getSouthAfricanHolidaysForYear(year) {
     logoutButton.style.display = isLoggedIn ? 'inline-flex' : 'none';
     expirySummary.style.display = isLoggedIn ? 'block' : 'none';
     renderExpiryOverview();
-    if (!isLoggedIn) showAuth();
+    if (isLoggedIn) hideAuth();
+    else showAuth();
   }
 
   authButton.addEventListener('click', () => {
@@ -1587,6 +1271,7 @@ function getSouthAfricanHolidaysForYear(year) {
   });
 
   logoutButton.addEventListener('click', async () => {
+    if (unsubscribeLiveSync) { unsubscribeLiveSync(); unsubscribeLiveSync = null; }
     try {
       await signOut(auth);
     } catch (e) {
@@ -1635,89 +1320,362 @@ function getSouthAfricanHolidaysForYear(year) {
     });
   }
 
-  const testTeleBtn = document.getElementById('btn-test-telegram');
-  if (testTeleBtn) {
-    testTeleBtn.addEventListener('click', async () => {
-      testTeleBtn.textContent = 'Sending...';
-      testTeleBtn.disabled = true;
-      const success = await sendTelegramAlert('🦉 <b>Nocturna Test</b>\nYour Telegram alerts are fully wired and working!');
-      testTeleBtn.textContent = success ? 'Sent to Telegram ✓' : 'Failed (Check Console)';
-      setTimeout(() => {
-        testTeleBtn.textContent = '✈️ Test Telegram Alert';
-        testTeleBtn.disabled = false;
-      }, 3000);
+
+  // ======================================================================
+  // "Up next" agenda — the first thing you see when you open the app
+  // ======================================================================
+
+  const agendaEl = document.getElementById('agenda');
+  const AGENDA_COLLAPSE_KEY = 'nocturna:agendaCollapsed';
+
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+  }
+
+  function colorHex(color) {
+    if (!color) return '#8b5cf6';
+    if (color.startsWith('#')) return color;
+    const c = COLORS.find(x => x.id === color);
+    return c ? c.hex : '#8b5cf6';
+  }
+
+  function openSheetForKey(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    openSheet(y, m - 1, d);
+  }
+
+  function inDaysText(n) {
+    return n === 0 ? 'today' : n === 1 ? 'tomorrow' : `in ${n} days`;
+  }
+
+  function shortDate(key) {
+    const [y, m, d] = key.split('-').map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString('en-ZA', { weekday: 'short', day: 'numeric', month: 'short' });
+  }
+
+  const isUserEvent = (ev) => !ev.isHoliday && !ev.isExpiryMarker;
+
+  // Open quests from today and the previous 7 days (so nothing slips).
+  function getOpenQuests(fromKey) {
+    const out = [];
+    for (let i = 7; i >= 0; i--) {
+      const key = coreAddDays(fromKey, -i);
+      const entry = globalCalendar[key.slice(0, 7)]?.[key.slice(8)];
+      (entry?.quests || []).filter(q => !q.done).forEach(q => out.push({ quest: q, key, carried: i > 0 }));
+    }
+    return out;
+  }
+
+  async function toggleQuestDone(key, questId) {
+    const entry = globalCalendar[key.slice(0, 7)]?.[key.slice(8)];
+    const quest = entry?.quests?.find(q => q.id === questId);
+    if (!quest) return;
+    quest.done = !quest.done;
+    await syncCalendarToCloud();
+    refreshAllViews();
+  }
+
+  function renderAgenda() {
+    if (!agendaEl) return;
+    if (!auth.currentUser) { agendaEl.hidden = true; return; }
+    agendaEl.hidden = false;
+    agendaEl.innerHTML = '';
+
+    const today = todayKey();
+    const day = computeDay(globalCalendar, today, bubwebActivities);
+    const todaysEvents = sortEvents(day.events.filter(isUserEvent));
+    const openQuests = getOpenQuests(today);
+    const collapsed = localStorage.getItem(AGENDA_COLLAPSE_KEY) === '1';
+    agendaEl.classList.toggle('collapsed', collapsed);
+
+    // Header
+    const hour = new Date().getHours();
+    const greet = hour < 5 ? 'Up late' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+    const head = el('div', 'agenda-head');
+    const titleWrap = el('div');
+    titleWrap.append(
+      el('span', 'agenda-greet', greet),
+      el('h2', 'agenda-date', new Date().toLocaleDateString('en-ZA', { weekday: 'long', day: 'numeric', month: 'long' }))
+    );
+    const summaryBits = [];
+    summaryBits.push(`${todaysEvents.length} event${todaysEvents.length === 1 ? '' : 's'}`);
+    summaryBits.push(`${openQuests.length} task${openQuests.length === 1 ? '' : 's'}`);
+    const toggle = el('button', 'agenda-toggle', `${summaryBits.join(' · ')} ${collapsed ? '▾' : '▴'}`);
+    toggle.type = 'button';
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.addEventListener('click', () => {
+      localStorage.setItem(AGENDA_COLLAPSE_KEY, collapsed ? '0' : '1');
+      renderAgenda();
     });
-  }
+    head.append(titleWrap, toggle);
+    agendaEl.appendChild(head);
+    if (collapsed) return;
 
-  function getReminderMilliseconds(reminderStr) {
-    const match = reminderStr.match(/(\d+)([mhd\w])/);
-    if (!match) return 0;
-    const [, num, unit] = match;
-    const n = parseInt(num);
-    if (unit === 'm') return n * 60 * 1000;
-    if (unit === 'h') return n * 60 * 60 * 1000;
-    if (unit === 'd') return n * 24 * 60 * 60 * 1000;
-    if (unit === 'w') return n * 7 * 24 * 60 * 60 * 1000;
-    return 0;
-  }
+    const body = el('div', 'agenda-body');
 
-  function triggerNotification(event, dateObj) {
-    const title = `Reminder: ${event.title}`;
-    const locationStr = event.location ? `\n📍 ${event.location}` : '';
-    const timeStr = event.time ? `\n⏰ ${formatTime(event.time)}` : '';
+    // --- Today column ---
+    const todayCol = el('div', 'agenda-card agenda-today');
+    todayCol.appendChild(el('h3', 'agenda-label', 'Today'));
+    const holiday = day.events.find(ev => ev.isHoliday);
+    if (holiday) {
+      const h = el('div', 'agenda-holiday', `${holiday.title}${holiday.isOff ? ' · day off' : ''}`);
+      h.style.color = holiday.color;
+      todayCol.appendChild(h);
+    }
+    day.events.filter(ev => ev.isExpiryMarker).forEach(ev => {
+      todayCol.appendChild(el('div', 'agenda-warn', `⚠️ ${ev.title}`));
+    });
+    if (!todaysEvents.length && !openQuests.length) {
+      const empty = el('button', 'agenda-empty', 'Nothing planned — tap to add something');
+      empty.type = 'button';
+      empty.addEventListener('click', () => openSheetForKey(today));
+      todayCol.appendChild(empty);
+    }
+    const now = new Date();
+    const nowHHMM = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+    todaysEvents.forEach(ev => {
+      const row = el('button', 'agenda-event');
+      row.type = 'button';
+      if (!ev.allDay && ev.time && ev.time < nowHHMM) row.classList.add('past');
+      const dot = el('span', 'agenda-dot');
+      dot.style.background = colorHex(ev.color);
+      const time = el('span', 'agenda-time', ev.allDay || !ev.time ? 'All day' : formatTime(ev.time));
+      const title = el('span', 'agenda-title', ev.title);
+      row.append(dot, time, title);
+      if (ev.location && !ev.isBubwebSynced) row.appendChild(el('span', 'agenda-loc', ev.location));
+      row.addEventListener('click', () => openSheetForKey(ev.isBubwebSynced ? today : (ev.originDate && !ev.isRecurringInstance ? ev.originDate : today)));
+      todayCol.appendChild(row);
+    });
+    openQuests.slice(0, 8).forEach(({ quest, key, carried }) => {
+      const row = el('label', 'agenda-quest');
+      const box = document.createElement('input');
+      box.type = 'checkbox';
+      box.addEventListener('change', () => toggleQuestDone(key, quest.id));
+      row.append(box, el('span', 'agenda-title', quest.text));
+      if (carried) row.appendChild(el('span', 'agenda-carried', `from ${shortDate(key)}`));
+      todayCol.appendChild(row);
+    });
+    if (openQuests.length > 8) todayCol.appendChild(el('div', 'agenda-more', `+${openQuests.length - 8} more tasks`));
+    body.appendChild(todayCol);
 
-    const telegramMessage = `🦉 <b>Nocturna Alert</b>\n<b>${event.title}</b>${timeStr}${locationStr}`;
-    sendTelegramAlert(telegramMessage);
+    // --- Next 7 days strip ---
+    const week = el('div', 'agenda-card agenda-week');
+    week.appendChild(el('h3', 'agenda-label', 'Next 7 days'));
+    const strip = el('div', 'week-strip');
+    for (let i = 1; i <= 7; i++) {
+      const key = coreAddDays(today, i);
+      const d = computeDay(globalCalendar, key, bubwebActivities);
+      const evs = sortEvents(d.events.filter(isUserEvent).filter(ev => ev.repeat !== 'daily'));
+      const quests = (d.quests || []).filter(q => !q.done);
+      const hol = d.events.find(ev => ev.isHoliday && ev.isOff);
+      const fest = d.events.find(ev => ev.isHoliday && !ev.isOff && !ev.isFuel);
+      const [y, m, dd] = key.split('-').map(Number);
+      const dateObj = new Date(y, m - 1, dd);
+      const cell = el('button', 'week-day');
+      cell.type = 'button';
+      if (dateObj.getDay() === 0 || dateObj.getDay() === 6) cell.classList.add('weekend');
+      if (hol) cell.classList.add('off');
+      if (!evs.length && !quests.length) cell.classList.add('free');
+      cell.append(
+        el('span', 'week-dow', dateObj.toLocaleDateString('en-ZA', { weekday: 'short' })),
+        el('span', 'week-num', String(dd))
+      );
+      const dots = el('span', 'week-dots');
+      evs.slice(0, 4).forEach(ev => {
+        const dot = el('i');
+        dot.style.background = colorHex(ev.color);
+        dots.appendChild(dot);
+      });
+      cell.appendChild(dots);
+      const first = evs[0];
+      cell.appendChild(el('span', 'week-first', hol ? 'Day off' : first ? first.title.replace(/^🎂\s*/u, '🎂 ') : fest ? fest.title : (quests.length ? `${quests.length} task${quests.length > 1 ? 's' : ''}` : '—')));
+      cell.title = [...(hol ? [hol.title] : []), ...evs.map(ev => `${ev.time && !ev.allDay ? formatTime(ev.time) + ' ' : ''}${ev.title}`)].join('\n') || 'Free';
+      cell.addEventListener('click', () => openSheetForKey(key));
+      strip.appendChild(cell);
+    }
+    week.appendChild(strip);
 
-    const options = {
-      body: `${event.time ? formatTime(event.time) + ' · ' : ''}${event.location || 'Upcoming event'}`,
-      tag: `nocturna-${event.id}`,
-      icon: 'data:image/svg+xml,<svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg"><circle cx="32" cy="32" r="30" fill="%238b5cf6"/></svg>'
+    // --- Countdown chips ---
+    const chips = el('div', 'agenda-chips');
+    const addChip = (text, tone, onClick) => {
+      const chip = el(onClick ? 'button' : 'span', `agenda-chip ${tone || ''}`, text);
+      if (onClick) { chip.type = 'button'; chip.addEventListener('click', onClick); }
+      chips.appendChild(chip);
     };
 
-    if (swRegistration && swRegistration.showNotification) {
-      swRegistration.showNotification(title, options);
-    } else if ('Notification' in window && Notification.permission === 'granted') {
-      new Notification(title, options);
+    upcomingBirthdays(globalCalendar, today, 30).slice(0, 3).forEach(({ ev, key, inDays }) => {
+      const name = ev.title.replace(/🎂\s*/u, '');
+      if (inDays === 0) {
+        addChip(`🎂 ${name} today — copy a wish`, 'pink', async (e) => {
+          try {
+            await navigator.clipboard.writeText(generateBirthdayWish(ev.title));
+            e.target.textContent = '🎂 Wish copied ✓';
+          } catch { showBirthdayBanner(ev.title, generateBirthdayWish(ev.title)); }
+        });
+      } else {
+        addChip(`🎂 ${name} ${inDaysText(inDays)}`, 'pink', () => openSheetForKey(key));
+      }
+    });
+
+    const ph = nextPublicHoliday(today, 120);
+    if (ph) {
+      const label = ph.inDays === 0 ? `🇿🇦 ${ph.holiday.name} today` : `🇿🇦 ${ph.holiday.name} ${inDaysText(ph.inDays)}`;
+      addChip(`${label}${ph.longWeekend ? ' · long weekend 🏖️' : ''}`, 'amber', () => openSheetForKey(ph.key));
+    }
+
+    getExpiryItems().forEach(item => {
+      const st = getExpiryStatus(item.expiryDate);
+      if (st.id === 'expired') addChip(`🔴 ${item.title} expired`, 'red', () => openSheetForKey(item.renewalDate));
+      else if (st.id === 'soon') addChip(`🟠 ${item.title} expires ${inDaysText(daysBetween(today, item.expiryDate))}`, 'orange', () => openSheetForKey(item.renewalDate));
+    });
+
+    for (let i = 0; i <= 6; i++) {
+      const key = coreAddDays(today, i);
+      if (computeDay(globalCalendar, key).events.some(ev => ev.isFuel)) {
+        addChip(`⛽ Fuel price change ${inDaysText(i)}`, 'amber');
+        break;
+      }
+    }
+
+    if (chips.children.length) week.appendChild(chips);
+    body.appendChild(week);
+    agendaEl.appendChild(body);
+  }
+
+  // ======================================================================
+  // Notifications on this device (while the app is open or in background
+  // tab). Closed-app alerts come from the Telegram notifier in /notifier.
+  // ======================================================================
+
+  const NOTIFIED_KEY = 'nocturna:notified';
+  const notifyStatusEl = document.getElementById('notify-status');
+  const notifyEnableBtn = document.getElementById('btn-enable-notify');
+  const notifyTestBtn = document.getElementById('btn-test-notify');
+
+  function loadNotified() {
+    try { return JSON.parse(localStorage.getItem(NOTIFIED_KEY) || '{}'); } catch { return {}; }
+  }
+  function markNotified(id) {
+    const log = loadNotified();
+    log[id] = Date.now();
+    Object.entries(log).forEach(([k, ts]) => { if (Date.now() - ts > 10 * 86400e3) delete log[k]; });
+    localStorage.setItem(NOTIFIED_KEY, JSON.stringify(log));
+  }
+  const wasNotified = (id) => !!loadNotified()[id];
+
+  function localToEpoch(key, hhmm) {
+    const [y, m, d] = key.split('-').map(Number);
+    const [h, mi] = hhmm.split(':').map(Number);
+    return new Date(y, m - 1, d, h, mi).getTime();
+  }
+
+  function notificationsSupported() {
+    return 'Notification' in window;
+  }
+
+  async function showLocalNotification(title, body, tag, key) {
+    if (!notificationsSupported() || Notification.permission !== 'granted') return false;
+    const options = {
+      body,
+      tag,
+      icon: 'icon-192.png',
+      badge: 'icon-192.png',
+      data: { url: key ? `./?date=${key}` : './' }
+    };
+    try {
+      const reg = swRegistration || (navigator.serviceWorker && await navigator.serviceWorker.ready);
+      if (reg && reg.showNotification) await reg.showNotification(title, options);
+      else new Notification(title, options);
+      return true;
+    } catch (e) {
+      console.warn('Notification failed:', e);
+      return false;
     }
   }
 
-  // Birthday Wishes Mix-and-Mash Engine
-  const BDAY_OPENERS = [
-    'Happy Birthday [Name]! 🎉',
-    'Wishing you the happiest of birthdays, [Name]! 🎂',
-    'Happy, happy birthday [Name]! ✨',
-    'Have a wonderful birthday, [Name]! 🥳',
-    'Warmest birthday wishes to you, [Name]! 🎈'
-  ];
-
-  const BDAY_BODIES = [
-    'I hope you have an incredibly special day filled with love and laughter.',
-    'May your day be filled with happiness, good food, and great company.',
-    'Hope your year ahead is bright, blessed, and full of exciting adventures.',
-    'Wishing you a relaxing day and a year full of wonderful surprises.',
-    'I hope today brings you as much joy as you give to everyone around you.'
-  ];
-
-  const BDAY_CLOSERS = [
-    'Enjoy every minute of it! 🥂',
-    'Have the absolute best celebration! 🎁',
-    'Sending you huge love and big hugs today! 💛',
-    'Cheers to another fantastic trip around the sun! ☀️'
-  ];
-
-  function generateBirthdayWish(rawTitle) {
-    const cleanName = rawTitle
-      .replace(/🎂|🎉|🎈/g, '')
-      .replace(/[’']s?\s*birthday/gi, '')
-      .replace(/birthday[:\s-]*/gi, '')
-      .trim() || 'friend';
-
-    const opener = BDAY_OPENERS[Math.floor(Math.random() * BDAY_OPENERS.length)].replace('[Name]', cleanName);
-    const body = BDAY_BODIES[Math.floor(Math.random() * BDAY_BODIES.length)];
-    const closer = BDAY_CLOSERS[Math.floor(Math.random() * BDAY_CLOSERS.length)];
-    return `${opener} ${body} ${closer}`;
+  function checkReminders() {
+    if (!auth.currentUser) return;
+    const now = Date.now();
+    dueReminders(globalCalendar, now, localToEpoch, bubwebActivities).forEach(r => {
+      if (wasNotified(r.id)) return;
+      // Only alert for reminders that came due in the last 30 minutes; older
+      // ones were missed while the app was closed (Telegram covers those).
+      const fireAt = r.start - REMINDER_MS[r.ev.reminder];
+      if (now - fireAt > 30 * 60e3) { markNotified(r.id); return; }
+      const mins = Math.round((r.start - now) / 60000);
+      const lead = mins < 60 ? `in ${mins} min` : mins < 1440 ? `in ${Math.round(mins / 60)}h` : shortDate(r.key);
+      const when = r.ev.allDay || !r.ev.time ? 'All day' : formatTime(r.ev.time);
+      showLocalNotification(`${r.ev.title} — ${lead}`, `${when}${r.ev.location ? ' · ' + r.ev.location : ''}`, r.id, r.key)
+        .then(ok => { if (ok) markNotified(r.id); });
+    });
   }
+
+  function checkExpiryReminders() {
+    if (!auth.currentUser) return;
+    const today = todayKey();
+    computeDay(globalCalendar, today).events.filter(ev => ev.isExpiryMarker).forEach(ev => {
+      const id = `expiry_${today}_${ev.id}`;
+      if (wasNotified(id)) return;
+      showLocalNotification(`⚠️ ${ev.title}`, 'Renewal reminder from Nocturna', id, ev.originDate)
+        .then(ok => { if (ok) markNotified(id); });
+    });
+  }
+
+  function renderNotifyStatus() {
+    if (!notifyStatusEl) return;
+    let text;
+    if (!notificationsSupported()) {
+      const ios = /iphone|ipad/i.test(navigator.userAgent);
+      text = ios
+        ? 'On iPhone, add Nocturna to your Home Screen (Share → Add to Home Screen) and open it from there to enable alerts.'
+        : 'This browser does not support notifications.';
+      if (notifyEnableBtn) notifyEnableBtn.style.display = 'none';
+    } else if (Notification.permission === 'granted') {
+      text = 'On for this device. Alerts show while Nocturna is open or in a background tab.';
+      if (notifyEnableBtn) notifyEnableBtn.style.display = 'none';
+    } else if (Notification.permission === 'denied') {
+      text = 'Blocked. Allow notifications for this site in your browser settings, then reload.';
+      if (notifyEnableBtn) notifyEnableBtn.style.display = 'none';
+    } else {
+      text = 'Off for this device.';
+      if (notifyEnableBtn) notifyEnableBtn.style.display = '';
+    }
+    notifyStatusEl.textContent = text;
+    if (notifyTestBtn) notifyTestBtn.style.display = notificationsSupported() && Notification.permission === 'granted' ? '' : 'none';
+  }
+
+  if (notifyEnableBtn) {
+    notifyEnableBtn.addEventListener('click', async () => {
+      try { await Notification.requestPermission(); } catch (e) { console.warn(e); }
+      renderNotifyStatus();
+      checkReminders();
+    });
+  }
+  if (notifyTestBtn) {
+    notifyTestBtn.addEventListener('click', async () => {
+      const ok = await showLocalNotification('🦉 Nocturna test', 'Notifications are working on this device.', 'nocturna-test');
+      notifyTestBtn.textContent = ok ? 'Sent ✓' : 'Failed — check browser settings';
+      setTimeout(() => { notifyTestBtn.textContent = 'Send test notification'; }, 2500);
+    });
+  }
+  renderNotifyStatus();
+
+  // Home-screen icon badge = today's events + open tasks (installed PWA).
+  function updateAppBadge() {
+    if (!('setAppBadge' in navigator)) return;
+    if (!auth.currentUser) { navigator.clearAppBadge?.().catch(() => {}); return; }
+    const today = todayKey();
+    const count = computeDay(globalCalendar, today, bubwebActivities).events.filter(isUserEvent).length
+      + getOpenQuests(today).length;
+    (count ? navigator.setAppBadge(count) : navigator.clearAppBadge()).catch(() => {});
+  }
+
+  // ======================================================================
+  // Birthday banner (in-app, once per day per device)
+  // ======================================================================
 
   function escapeHtml(value) {
     return String(value)
@@ -1754,7 +1712,6 @@ function getSouthAfricanHolidaysForYear(year) {
         </div>
       </div>
     `;
-
     banner.classList.add('visible');
 
     const copyBtn = banner.querySelector('.bday-copy-btn');
@@ -1768,8 +1725,7 @@ function getSouthAfricanHolidaysForYear(year) {
       }
     });
 
-    const rerollBtn = banner.querySelector('.bday-reroll-btn');
-    rerollBtn.addEventListener('click', () => {
+    banner.querySelector('.bday-reroll-btn').addEventListener('click', () => {
       wishText = generateBirthdayWish(title);
       banner.querySelector('.bday-wish-preview').textContent = `"${wishText}"`;
     });
@@ -1784,97 +1740,64 @@ function getSouthAfricanHolidaysForYear(year) {
   }
 
   function checkBirthdayReminders() {
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth();
-    const day = now.getDate();
-    const sevenAmToday = new Date(year, month, day, 7, 0, 0);
-
-    // A birthday is eligible any time after 7:00 AM, including when the app
-    // is opened later in the morning or afternoon.
-    if (now < sevenAmToday) return;
-
-    const todayKey = dateKey(year, month, day);
-    const events = getDayData(year, month, day).events || [];
-
-    events.forEach(event => {
-      const isBirthday = event.repeat === 'yearly' || /birthday|🎂/i.test(event.title || '');
-      if (!isBirthday) return;
-
-      const reminderId = `bday_7am_${todayKey}_${event.id || event.title}`;
-      if (triggeredReminders.has(reminderId)) return;
-      triggeredReminders.add(reminderId);
-
-      const generatedWish = generateBirthdayWish(event.title || 'friend');
-      const safeTitle = escapeHtml(event.title || 'Friend');
-      const safeWish = escapeHtml(generatedWish);
-      const telegramMessage = `🎂 <b>Birthday Today!</b>\nIt's <b>${safeTitle}</b> today.\n\n<i>Suggested greeting to copy:</i>\n"${safeWish}"`;
-      sendTelegramAlert(telegramMessage);
-      showBirthdayBanner(event.title || 'Friend', generatedWish);
+    if (!auth.currentUser) return;
+    if (new Date().getHours() < 7) return;
+    const today = todayKey();
+    computeDay(globalCalendar, today, bubwebActivities).events.filter(isBirthdayEvent).forEach(ev => {
+      const id = `bday_${today}_${ev.id || ev.title}`;
+      if (triggeredReminders.has(id) || wasNotified(id)) return;
+      triggeredReminders.add(id);
+      markNotified(id);
+      showBirthdayBanner(ev.title || 'Friend', generateBirthdayWish(ev.title || 'friend'));
     });
   }
 
-  function checkReminders() {
-    const now = new Date();
+  // ======================================================================
+  // Timers, day rollover, deep links, service worker
+  // ======================================================================
 
-    Object.entries(globalCalendar).forEach(([monthKey, monthData]) => {
-      Object.entries(monthData).forEach(([dayKey, dayEntry]) => {
-        if (!dayEntry.events) return;
-
-        dayEntry.events.forEach(event => {
-          if (!event.reminder || event.reminder === 'none') return;
-          const reminderId = `${event.id}_${monthKey}_${dayKey}`;
-          if (triggeredReminders.has(reminderId)) return;
-
-          const reminderMs = getReminderMilliseconds(event.reminder);
-          const [y, m] = monthKey.split('-').map(Number);
-          const d = Number(dayKey);
-          const eventDate = new Date(y, m - 1, d);
-
-          if (event.time) {
-            const [h, mm] = event.time.split(':').map(Number);
-            eventDate.setHours(h, mm, 0, 0);
-          } else {
-            eventDate.setHours(9, 0, 0, 0);
-          }
-
-          const reminderTime = new Date(eventDate.getTime() - reminderMs);
-          const diff = now.getTime() - reminderTime.getTime();
-
-          if (diff >= 0 && diff < 180000 && now < eventDate) {
-            triggeredReminders.add(reminderId);
-            triggerNotification(event, eventDate);
-          }
-        });
-      });
-    });
+  let lastSeenDay = todayKey();
+  function tick() {
+    if (todayKey() !== lastSeenDay) {
+      lastSeenDay = todayKey();
+      reloadEntireCalendar(); // move the "today" ring and refresh the agenda
+      return;
+    }
+    checkReminders();
+    checkExpiryReminders();
+    checkBirthdayReminders();
   }
 
-  function checkExpiryReminders() {
-    const now = new Date();
-    const todayKey = dateKey(now.getFullYear(), now.getMonth(), now.getDate());
-    const expiryMarkers = (getDayData(now.getFullYear(), now.getMonth(), now.getDate()).events || [])
-      .filter(event => event.isExpiryMarker);
+  setInterval(tick, 30000);
+  setTimeout(tick, 2500);
+  setInterval(renderAgenda, 5 * 60e3); // keep greeting / past events fresh
 
-    expiryMarkers.forEach(event => {
-      const reminderId = `expiry_${todayKey}_${event.id}`;
-      if (triggeredReminders.has(reminderId)) return;
-      triggeredReminders.add(reminderId);
-      triggerNotification(event, now);
-    });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      tick();
+      renderAgenda();
+      renderNotifyStatus();
+    }
+  });
+
+  // Notification taps open "./?date=YYYY-MM-DD" -> jump straight to that day.
+  let pendingDeepLink = new URLSearchParams(location.search).get('date');
+  function consumeDeepLink() {
+    if (!pendingDeepLink || !auth.currentUser || !/^\d{4}-\d{2}-\d{2}$/.test(pendingDeepLink)) return;
+    const key = pendingDeepLink;
+    pendingDeepLink = null;
+    history.replaceState(null, '', location.pathname);
+    openSheetForKey(key);
   }
-
-  setInterval(checkReminders, 15000);
-  setInterval(checkExpiryReminders, 15000);
-  setInterval(checkBirthdayReminders, 60000);
-  setTimeout(checkExpiryReminders, 2500);
-  setTimeout(checkBirthdayReminders, 2500);
+  onAuthStateChanged(auth, (user) => { if (user) setTimeout(consumeDeepLink, 800); });
 
   if ('serviceWorker' in navigator) {
-    window.addEventListener('load', async () => {
-      try {
-        swRegistration = await navigator.serviceWorker.register('./sw.js');
-      } catch (e) {}
+    navigator.serviceWorker.register('./sw.js').then(reg => { swRegistration = reg; }).catch(() => {});
+    navigator.serviceWorker.addEventListener('message', (event) => {
+      if (event.data?.type === 'open-date') {
+        pendingDeepLink = event.data.date;
+        consumeDeepLink();
+      }
     });
   }
 

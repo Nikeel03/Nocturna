@@ -1,0 +1,6 @@
+{
+  "name": "nocturna",
+  "private": true,
+  "type": "module",
+  "description": "Marks the shared calendar-core.js as an ES module for the Node notifier. Not needed by the web app."
+}

@@ -114,6 +114,8 @@
   </div>
 </header>
 
+<section id="agenda" class="agenda" aria-label="Today and the week ahead" hidden></section>
+
 <div id="calendar-list"></div>
 <div id="sentinel"></div>
 <div class="loading-row">Loading…</div>
@@ -247,10 +249,11 @@
 
     <div class="mini-card">
       <div class="field">
-        <label>Notifications</label>
-        <button type="button" class="btn btn-secondary" id="btn-test-telegram" style="margin-top: 8px; width: 100%; font-size: 12px;">
-          ✈️ Test Telegram Alert
-        </button>
+        <label>Notifications on this device</label>
+        <p class="notify-status" id="notify-status"></p>
+        <button type="button" class="btn btn-primary" id="btn-enable-notify" style="width: 100%; font-size: 12px;">🔔 Turn on notifications</button>
+        <button type="button" class="btn btn-secondary" id="btn-test-notify" style="margin-top: 8px; width: 100%; font-size: 12px;">Send test notification</button>
+        <p class="notify-hint">Morning briefings and reminders when the app is closed come through Telegram — text the bot to add events.</p>
       </div>
     </div>
 
@@ -285,7 +288,6 @@
   </div>
 </div>
 
-<script src="env.js"></script>
 <script type="module" src="script.js"></script>
 </body>
 </html>
