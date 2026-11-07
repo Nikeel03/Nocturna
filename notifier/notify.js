@@ -23,7 +23,7 @@ const DIGEST_TIME = process.env.DIGEST_TIME || '06:30';
 const EVENING_TIME = process.env.EVENING_TIME || '20:00';
 const BOT = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT = String(process.env.TELEGRAM_CHAT_ID || '');
-const USERNAME = (process.env.NOCTURNA_USERNAME || '').trim().toLowerCase();
+const USERNAME = (process.env.NOCTURNA_USERNAME || '').trim();
 const APP_URL = process.env.NOCTURNA_APP_URL || '';
 const MODE = process.env.MODE || 'auto'; // auto | digest | evening | test
 const BUBWEB_URL = 'https://guide-to-the-outside-default-rtdb.firebaseio.com/activities.json';
@@ -199,10 +199,13 @@ function initFirebase() {
 
 async function findUser(db) {
   if (USERNAME) {
-    const snap = await db.collection('users').where('username', '==', USERNAME).limit(1).get();
-    if (!snap.empty) return snap.docs[0];
-    // usernames are stored with original casing; fall back to the derived email
-    const byEmail = await db.collection('users').where('email', '==', `${USERNAME.replace(/\s+/g, '')}@nocturna.com`).limit(1).get();
+    // The app stores the username as typed and the email lower-cased.
+    for (const value of new Set([USERNAME, USERNAME.toLowerCase()])) {
+      const snap = await db.collection('users').where('username', '==', value).limit(1).get();
+      if (!snap.empty) return snap.docs[0];
+    }
+    const email = `${USERNAME.toLowerCase().replace(/\s+/g, '')}@nocturna.com`;
+    const byEmail = await db.collection('users').where('email', '==', email).limit(1).get();
     if (!byEmail.empty) return byEmail.docs[0];
     throw new Error(`No Nocturna user found for NOCTURNA_USERNAME="${USERNAME}"`);
   }
@@ -388,6 +391,11 @@ async function main() {
 
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   main().then(() => process.exit(0)).catch((e) => {
+    if (e && e.code === 16) {
+      console.error('❌ Google rejected the Firebase key (UNAUTHENTICATED). A brand-new key can take a minute or two to start working: wait and try again. If it keeps failing, check the Mac clock is set automatically, or generate a new key.');
+    } else if (e && e.code === 7) {
+      console.error('❌ The Firebase key is valid but lacks permission. Generate the key from Project settings → Service accounts (Firebase Admin SDK).');
+    }
     console.error(e);
     process.exit(1);
   });
