@@ -10,6 +10,7 @@
 
 import admin from 'firebase-admin';
 import { pathToFileURL } from 'node:url';
+import { readFileSync } from 'node:fs';
 import {
   addDaysToKey, computeDay, daysBetween, dueReminders, formatTime, generateBirthdayWish,
   getExpiryItems, getExpiryStatus, isBirthdayEvent, nextPublicHoliday, pad, parseKey,
@@ -189,8 +190,9 @@ function buildDayList(calendar, bubweb, startKey, days, heading) {
 // ------------------------------------------------------------ firestore ----
 
 function initFirebase() {
-  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-  if (!raw) throw new Error('FIREBASE_SERVICE_ACCOUNT secret is missing');
+  const file = process.env.FIREBASE_SERVICE_ACCOUNT_FILE;
+  const raw = file ? readFileSync(file, 'utf8') : process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) throw new Error('Set FIREBASE_SERVICE_ACCOUNT_FILE (path to the key JSON) or FIREBASE_SERVICE_ACCOUNT');
   admin.initializeApp({ credential: admin.credential.cert(JSON.parse(raw)) });
   return admin.firestore();
 }
